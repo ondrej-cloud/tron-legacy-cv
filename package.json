@@ -3,6 +3,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node tools/test-gestures.mjs"
+    "test": "node tools/test-gestures.mjs",
+    "shot": "node tools/shot.mjs"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.63.0"
   }
 }
