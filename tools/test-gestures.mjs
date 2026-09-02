@@ -37,6 +37,16 @@ for (const physical of ['left', 'right']) {
   }
 }
 
+// a fist with the thumb pressed against the index finger is still a fist, not a pinch
+for (const physical of ['left', 'right']) {
+  for (const reach of [0.6, 0.8, 1]) {
+    const pose = { curl: POSES.fist.curl, touch: { index: reach } };
+    const result = analyzeHand(poseToLandmarks({ x: 1, y: 0.5, size: 0.13, physical }, pose), physical);
+    check(result.gesture === 'fist',
+      `fist with thumb on index (${physical}, reach ${reach}): got ${result.gesture}, touch ${result.touch.index.toFixed(2)}`);
+  }
+}
+
 // opening a pinch should pass through pinch -> open without other gestures in between
 const sweep = [0, 0.25, 0.5, 0.75, 1].map((amount) => analyzeHand(
   poseToLandmarks({ x: 1, y: 0.5, size: 0.13, physical: 'right' }, blendPoses(POSES.pinch, POSES.open, amount)),

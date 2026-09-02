@@ -73,18 +73,21 @@ export function analyzeHand(points, physical) {
   const up = sub(points[9], points[0]);
   const roll = Math.atan2(up.x, -up.y);   // 0 = fingers up, positive = tilted right
   const thumbUp = extended.thumb && points[4].y < points[2].y - 0.4 * palmSize;
+  // In a fist the thumb rests against the index finger just like in a pinch;
+  // the difference is that a fist folds the index tip back towards the wrist.
+  const indexFolded = distance(points[8], points[0]) < distance(points[6], points[0]);
 
   return {
-    extended, curl, touch, palmFacing, roll, palmSize,
+    extended, curl, touch, palmFacing, roll, palmSize, indexFolded,
     count: FINGERS.filter((finger) => extended[finger]).length,
-    gesture: classify(extended, touch, thumbUp),
+    gesture: classify(extended, touch, thumbUp, indexFolded),
   };
 }
 
-function classify(extended, touch, thumbUp) {
+function classify(extended, touch, thumbUp, indexFolded) {
   const { index, middle, ring, pinky } = extended;
   const raised = [index, middle, ring, pinky].filter(Boolean).length;
-  if (touch.index < TOUCH_ON) return middle && ring && pinky ? 'ok' : 'pinch';
+  if (touch.index < TOUCH_ON && !indexFolded) return middle && ring && pinky ? 'ok' : 'pinch';
   if (raised === 0) return thumbUp ? 'thumbsUp' : 'fist';
   if (raised === 1 && index) return 'point';
   if (raised === 2 && index && middle) return 'peace';
