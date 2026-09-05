@@ -67,8 +67,8 @@ export function analyzeHand(points, physical) {
   // the screen (positive z of this cross product), a left hand the opposite.
   const toIndex = sub(points[5], points[0]);
   const toPinky = sub(points[17], points[0]);
-  const normalZ = toIndex.x * toPinky.y - toIndex.y * toPinky.x;
-  const palmFacing = physical === 'right' ? normalZ > 0 : normalZ < 0;
+  const palmNormalZ = (toIndex.x * toPinky.y - toIndex.y * toPinky.x) / (palmSize * palmSize);
+  const palmFacing = palmFacingFor(physical, palmNormalZ);
 
   const up = sub(points[9], points[0]);
   const roll = Math.atan2(up.x, -up.y);   // 0 = fingers up, positive = tilted right
@@ -78,10 +78,16 @@ export function analyzeHand(points, physical) {
   const indexFolded = distance(points[8], points[0]) < distance(points[6], points[0]);
 
   return {
-    extended, curl, touch, palmFacing, roll, palmSize, indexFolded,
+    extended, curl, touch, palmFacing, palmNormalZ, roll, palmSize, indexFolded,
     count: FINGERS.filter((finger) => extended[finger]).length,
     gesture: classify(extended, touch, thumbUp, indexFolded),
   };
+}
+
+// A left palm and a right back of the hand look alike in 2D (they're mirror
+// images), so which side faces the camera depends on which hand it is.
+export function palmFacingFor(physical, palmNormalZ) {
+  return physical === 'right' ? palmNormalZ > 0 : palmNormalZ < 0;
 }
 
 function classify(extended, touch, thumbUp, indexFolded) {

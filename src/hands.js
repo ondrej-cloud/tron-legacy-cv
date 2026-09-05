@@ -12,7 +12,7 @@
 // slots, `left` and `right`, assigned by which side of the screen they are on.
 // Every hand also carries finger-level analysis from gestures.js.
 
-import { analyzeHand, poseToLandmarks, blendPoses, POSES, TOUCH_ON, TOUCH_OFF } from './gestures.js';
+import { analyzeHand, palmFacingFor, poseToLandmarks, blendPoses, POSES, TOUCH_ON, TOUCH_OFF } from './gestures.js';
 
 const VISION_URL = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs';
 const WASM_URL = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm';
@@ -34,6 +34,9 @@ const PINCH_SMOOTHING = 0.05;
 const VELOCITY_SMOOTHING = 0.08;
 // procedural hands: palm length as a fraction of the viewport height
 const SYNTHETIC_PALM_SIZE = 0.13;
+// two hands at least this far apart (viewport x) teach us how MediaPipe labels them
+const CALIBRATION_MIN_GAP = 0.15;
+const CALIBRATION_LIMIT = 60;
 
 export const HAND_CONNECTIONS = [
   [0, 1], [1, 2], [2, 3], [3, 4],
@@ -130,6 +133,9 @@ export class Hands {
     this.lastUpdateMs = performance.now();
     this.demoStartMs = performance.now();
     this.demoScript = pinchDemo;
+    // > 0: MediaPipe's handedness labels need swapping (assumed at start),
+    // < 0: they don't. Learned from frames with two hands side by side.
+    this.labelSwapScore = 1;
     this.mouse = { x: 0.7, y: 0.5, down: false, seen: false };
     this._bindMouse();
   }
@@ -267,15 +273,15 @@ export class Hands {
     return (result.landmarks || []).map((raw, handIndex) => {
       // hand space: mirrored, all axes in units of the frame height
       const points = raw.map((point) => ({ x: (1 - point.x) * aspect, y: point.y, z: point.z * aspect }));
-      // MediaPipe labels assume a mirrored input; ours isn't, so they're swapped
-      const label = handedness[handIndex]?.[0]?.categoryName;
-      const physical = label === 'Left' ? 'right' : 'left';
-      const analysis = analyzeHand(points, physical);
+      // raw label; whether it needs swapping for our unmirrored input is learned in _assign
+      const label = handedness[handIndex]?.[0]?.categoryName === 'Left' ? 'left' : 'right';
+      const analysis = analyzeHand(points, 'right');
       const pinchRatio = analysis.touch.index;
       const landmarks = raw.map((point) => this._videoToViewport(point));
       return {
         landmarks,
-        physical,
+        label,
+        physical: null,
         analysis,
         size: analysis.palmSize * this._viewportScale(),
         pinch: clamp01((pinchRatio - PINCH_RATIO_CLOSED) / (PINCH_RATIO_OPEN - PINCH_RATIO_CLOSED)),
@@ -329,6 +335,21 @@ export class Hands {
     if (sorted.length >= 2) {
       targets.set(this.left, sorted[0]);
       targets.set(this.right, sorted[sorted.length - 1]);
+      // two hands side by side: the one on the left of the mirrored view is the
+      // real left hand (unless the arms are crossed), which also tells us
+      // whether MediaPipe's labels are swapped
+      const pair = [sorted[0], sorted[sorted.length - 1]];
+      if (pair.every((observation) => observation.label) &&
+          midX(pair[1]) - midX(pair[0]) > CALIBRATION_MIN_GAP) {
+        const swapped = pair[0].label === 'right' && pair[1].label === 'left';
+        const straight = pair[0].label === 'left' && pair[1].label === 'right';
+        if (swapped || straight) {
+          this.labelSwapScore = Math.max(-CALIBRATION_LIMIT,
+            Math.min(CALIBRATION_LIMIT, this.labelSwapScore + (swapped ? 1 : -1)));
+        }
+      }
+      pair[0].physical ??= 'left';
+      pair[1].physical ??= 'right';
     } else if (sorted.length === 1) {
       const observation = sorted[0];
       const recent = [this.left, this.right]
@@ -338,6 +359,11 @@ export class Hands {
       targets.set(slot, observation);
     }
     for (const [hand, observation] of targets) {
+      if (!observation.physical) {
+        const swap = this.labelSwapScore > 0;
+        observation.physical = swap === (observation.label === 'left') ? 'right' : 'left';
+      }
+      observation.analysis.palmFacing = palmFacingFor(observation.physical, observation.analysis.palmNormalZ);
       hand.target = observation;
       hand.lastSeenMs = nowMs;
     }
