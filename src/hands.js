@@ -12,22 +12,17 @@
 // slots, `left` and `right`, assigned by which side of the screen they are on.
 // Every hand also carries finger-level analysis from gestures.js.
 
-import { analyzeHand, palmFacingFor, poseToLandmarks, blendPoses, POSES, TOUCH_ON, TOUCH_OFF } from './gestures.js';
+import { analyzeHand, palmFacingFor, poseToLandmarks, blendPoses, POSES, THRESHOLDS } from './gestures.js';
 
 const VISION_URL = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs';
 const WASM_URL = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm';
 const MODEL_URL = 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task';
 
-// pinch openness = thumb-index gap / palm size, mapped from these ratios to 0..1
-const PINCH_RATIO_CLOSED = 0.25;
-const PINCH_RATIO_OPEN = 1.2;
 // hysteresis so `closed` doesn't flicker around a single threshold
 const CLOSE_BELOW = 0.18;
 const OPEN_ABOVE = 0.32;
 // keep a hand alive briefly through tracking dropouts
 const LOST_AFTER_MS = 250;
-// a new gesture must hold this long before it replaces the current one
-const GESTURE_HOLD_MS = 90;
 // smoothing time constants (seconds)
 const POSITION_SMOOTHING = 0.045;
 const PINCH_SMOOTHING = 0.05;
@@ -89,6 +84,10 @@ function expSmooth(current, target, dt, timeConstant) {
 
 function clamp01(value) {
   return Math.min(1, Math.max(0, value));
+}
+
+function pinchOpenness(ratio) {
+  return clamp01((ratio - THRESHOLDS.pinchRatioClosed) / (THRESHOLDS.pinchRatioOpen - THRESHOLDS.pinchRatioClosed));
 }
 
 // Default demo: both hands drift on Lissajous paths and run a 7 s pinch
@@ -284,7 +283,7 @@ export class Hands {
         physical: null,
         analysis,
         size: analysis.palmSize * this._viewportScale(),
-        pinch: clamp01((pinchRatio - PINCH_RATIO_CLOSED) / (PINCH_RATIO_OPEN - PINCH_RATIO_CLOSED)),
+        pinch: pinchOpenness(pinchRatio),
       };
     });
   }
@@ -323,7 +322,7 @@ export class Hands {
       physical,
       analysis,
       size,
-      pinch: pinch ?? clamp01((pinchRatio - PINCH_RATIO_CLOSED) / (PINCH_RATIO_OPEN - PINCH_RATIO_CLOSED)),
+      pinch: pinch ?? pinchOpenness(pinchRatio),
     };
   }
 
@@ -418,6 +417,7 @@ export class Hands {
     hand.tips = {};
     for (const [finger, index] of Object.entries(TIP_INDICES)) hand.tips[finger] = landmarks[index];
     hand.physical = observation.physical;
+    hand.label = observation.label ?? null;
     hand.fingers = observation.analysis;
     hand.palmFacing = observation.analysis.palmFacing;
     hand.roll = observation.analysis.roll;
@@ -436,10 +436,10 @@ export class Hands {
     if (hand.closed) hand.closedMs += dt * 1000;
 
     for (const [finger, ratio] of Object.entries(observation.analysis.touch)) {
-      if (!hand.touching[finger] && ratio < TOUCH_ON) {
+      if (!hand.touching[finger] && ratio < THRESHOLDS.touchOn) {
         hand.touching[finger] = true;
         hand.taps.push(finger);
-      } else if (hand.touching[finger] && ratio > TOUCH_OFF) {
+      } else if (hand.touching[finger] && ratio > THRESHOLDS.touchOff) {
         hand.touching[finger] = false;
       }
     }
@@ -450,7 +450,7 @@ export class Hands {
       hand.pendingGesture = raw;
       hand.pendingSince = nowMs;
     }
-    if (raw !== hand.gesture && nowMs - hand.pendingSince >= GESTURE_HOLD_MS) {
+    if (raw !== hand.gesture && nowMs - hand.pendingSince >= THRESHOLDS.gestureHoldMs) {
       this._setGesture(hand, raw, nowMs);
     }
   }

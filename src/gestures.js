@@ -19,14 +19,26 @@ const CHAINS = {
 };
 const TIPS = { index: 8, middle: 12, ring: 16, pinky: 20 };
 
-// a finger counts as extended when its bones are this aligned (mean cosine)
-const EXTENDED_STRAIGHTNESS = 0.55;
-const THUMB_STRAIGHTNESS = 0.6;
-// thumb tip this far from the index knuckle (in palm sizes) = thumb sticks out
-const THUMB_OUT_DISTANCE = 0.55;
-// thumb tip to fingertip, in palm sizes: touching below ON, released above OFF
-export const TOUCH_ON = 0.3;
-export const TOUCH_OFF = 0.45;
+// Every tunable threshold of the recognition, in one mutable object so the
+// tuning panel (src/tuning.js, key G) can adjust them live.
+export const THRESHOLDS = {
+  // a finger counts as extended when its bones are this aligned (mean cosine)
+  extendedStraightness: 0.55,
+  thumbStraightness: 0.6,
+  // thumb tip this far from the index knuckle (in palm sizes) = thumb sticks out
+  thumbOutDistance: 0.55,
+  // thumbs up: thumb tip this far above its knuckle (in palm sizes)
+  thumbUpLift: 0.4,
+  // thumb tip to fingertip, in palm sizes: touching below ON, released above OFF
+  touchOn: 0.3,
+  touchOff: 0.45,
+  // pinch openness: thumb-index gap in palm sizes mapped from closed..open to 0..1
+  pinchRatioClosed: 0.25,
+  pinchRatioOpen: 1.2,
+  // a new gesture must hold this long before it replaces the current one
+  gestureHoldMs: 90,
+};
+export const DEFAULT_THRESHOLDS = { ...THRESHOLDS };
 
 const sub = (a, b) => ({ x: a.x - b.x, y: a.y - b.y, z: a.z - b.z });
 const length = (v) => Math.hypot(v.x, v.y, v.z);
@@ -51,12 +63,14 @@ export function analyzeHand(points, physical) {
   const palmSize = distance(points[0], points[9]) || 1e-6;
   const extended = {};
   const curl = {};
+  const straight = {};
+  const thumbOut = distance(points[4], points[5]) / palmSize;
   for (const finger of FINGERS) {
-    const straight = straightness(points, CHAINS[finger]);
-    curl[finger] = Math.min(1, Math.max(0, (1 - straight) / 1.2));
+    straight[finger] = straightness(points, CHAINS[finger]);
+    curl[finger] = Math.min(1, Math.max(0, (1 - straight[finger]) / 1.2));
     extended[finger] = finger === 'thumb'
-      ? straight > THUMB_STRAIGHTNESS && distance(points[4], points[5]) / palmSize > THUMB_OUT_DISTANCE
-      : straight > EXTENDED_STRAIGHTNESS && distance(points[0], points[CHAINS[finger][4]]) >
+      ? straight.thumb > THRESHOLDS.thumbStraightness && thumbOut > THRESHOLDS.thumbOutDistance
+      : straight[finger] > THRESHOLDS.extendedStraightness && distance(points[0], points[CHAINS[finger][4]]) >
         distance(points[0], points[CHAINS[finger][2]]);
   }
   const touch = {};
@@ -72,13 +86,13 @@ export function analyzeHand(points, physical) {
 
   const up = sub(points[9], points[0]);
   const roll = Math.atan2(up.x, -up.y);   // 0 = fingers up, positive = tilted right
-  const thumbUp = extended.thumb && points[4].y < points[2].y - 0.4 * palmSize;
+  const thumbUp = extended.thumb && points[4].y < points[2].y - THRESHOLDS.thumbUpLift * palmSize;
   // In a fist the thumb rests against the index finger just like in a pinch;
   // the difference is that a fist folds the index tip back towards the wrist.
   const indexFolded = distance(points[8], points[0]) < distance(points[6], points[0]);
 
   return {
-    extended, curl, touch, palmFacing, palmNormalZ, roll, palmSize, indexFolded,
+    extended, curl, straight, thumbOut, touch, palmFacing, palmNormalZ, roll, palmSize, indexFolded,
     count: FINGERS.filter((finger) => extended[finger]).length,
     gesture: classify(extended, touch, thumbUp, indexFolded),
   };
@@ -93,7 +107,7 @@ export function palmFacingFor(physical, palmNormalZ) {
 function classify(extended, touch, thumbUp, indexFolded) {
   const { index, middle, ring, pinky } = extended;
   const raised = [index, middle, ring, pinky].filter(Boolean).length;
-  if (touch.index < TOUCH_ON && !indexFolded) return middle && ring && pinky ? 'ok' : 'pinch';
+  if (touch.index < THRESHOLDS.touchOn && !indexFolded) return middle && ring && pinky ? 'ok' : 'pinch';
   if (raised === 0) return thumbUp ? 'thumbsUp' : 'fist';
   if (raised === 1 && index) return 'point';
   if (raised === 2 && index && middle) return 'peace';

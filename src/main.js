@@ -21,6 +21,7 @@
 
 import { Hands } from './hands.js';
 import { createUI } from './ui.js';
+import { createTuningPanel } from './tuning.js';
 import { EFFECTS } from './effects/index.js';
 
 const DEFAULT_CAMERA_FILTER = 'brightness(0.72) saturate(0.9)';
@@ -37,6 +38,7 @@ let active = null;
 let activationToken = 0;
 
 const ui = createUI(hands);
+const tuning = createTuningPanel(hands);
 
 async function activate(id) {
   const token = ++activationToken;
@@ -80,6 +82,7 @@ function frame(nowMs) {
     active.effect.render();
   }
   ui.update();
+  tuning.update();
   window.__stats.frames++;
   window.__stats.effect = active?.id ?? null;
   window.__stats.hands = hands.list
