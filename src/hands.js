@@ -119,7 +119,8 @@ export class Hands {
     const params = new URLSearchParams(location.search);
     this.mode = mode
       || (params.has('demo') ? 'demo' : params.has('mouse') ? 'mouse' : 'camera');
-    this.status = 'starting';
+    this.status = 'camera off';
+    this.started = false;
     this.left = createHand('left');
     this.right = createHand('right');
     this.video = document.createElement('video');
@@ -143,17 +144,29 @@ export class Hands {
     return [this.left, this.right].filter((hand) => hand.visible);
   }
 
-  // Returns immediately; camera and tracker load in the background
-  // (`ready` resolves when done) so the scene can render meanwhile.
+  // Asks for the camera. Call it from a user action (a button) so the
+  // browser's permission prompt shows up when the user expects it. Returns
+  // immediately: `cameraReady` resolves to true/false once the user answers,
+  // `ready` when the hand tracker has loaded as well.
   start() {
-    this.ready = this._startCamera();
+    if (this.started) return this;
+    this.started = true;
+    this.cameraReady = this._openCamera();
+    this.ready = this.cameraReady.then((granted) => {
+      if (granted && this.mode === 'camera') return this._loadTracker();
+      this._refreshStatus();
+      return undefined;
+    });
     return this;
   }
 
   setMode(mode) {
     this.mode = mode;
     if (mode === 'demo') this.demoStartMs = performance.now();
-    if (mode === 'camera') this._loadTracker();
+    if (mode === 'camera') {
+      if (!this.started) this.start();   // e.g. demo first, camera later
+      else this._loadTracker();
+    }
     this._refreshStatus();
   }
 
@@ -170,7 +183,7 @@ export class Hands {
     else if (this.landmarker) this.status = 'ready';
   }
 
-  async _startCamera() {
+  async _openCamera() {
     this.status = 'requesting camera';
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -178,14 +191,13 @@ export class Hands {
       this.video.srcObject = stream;
       await this.video.play().catch(() => {});
       this.hasCamera = true;
+      return true;
     } catch (cameraError) {
       console.warn('camera unavailable, falling back to mouse', cameraError);
       if (this.mode === 'camera') this.mode = 'mouse';
       this.status = 'no camera, using mouse';
-      return;
+      return false;
     }
-    if (this.mode === 'camera') await this._loadTracker();
-    else this._refreshStatus();
   }
 
   // MediaPipe is only downloaded the first time tracking is actually needed.

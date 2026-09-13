@@ -9,7 +9,8 @@
 //       update(nowMs, dt),     // hands.update() has already run this frame
 //       render(),              // draw one frame; clear to BLACK, black = see-through
 //       resize(width, height), // CSS pixels; also called whenever the effect is shown
-//       cameraFilter,          // optional CSS filter for the webcam behind this effect
+//       cameraFilter,          // optional CSS filter for the webcam behind this effect;
+//                              // read every frame, so a getter can animate it
 //       demoScript(t),         // optional scripted hands for demo mode (see hands.js)
 //       stats(),               // optional, merged into window.__stats
 //     };
@@ -27,7 +28,11 @@ import { EFFECTS } from './effects/index.js';
 const DEFAULT_CAMERA_FILTER = 'brightness(0.72) saturate(0.9)';
 
 const params = new URLSearchParams(location.search);
-const hands = new Hands().start();
+// The intro asks for the camera itself (from a button), so the browser prompt
+// doesn't appear over the boot animation. Without the intro, ask right away.
+let introRunning = !params.has('skipintro') && (params.has('intro') || !params.has('demo'));
+const hands = new Hands();
+if (!introRunning) hands.start();
 const stage = document.getElementById('stage');
 hands.video.className = 'camera';
 stage.prepend(hands.video);
@@ -39,6 +44,17 @@ let activationToken = 0;
 
 const ui = createUI(hands);
 const tuning = createTuningPanel(hands);
+
+// The intro covers the screen until the user enters (demo runs skip it unless ?intro).
+if (introRunning) {
+  import('./intro.js')
+    .then(({ runIntro }) => runIntro({ hands, onDone: () => { introRunning = false; } }))
+    .catch((error) => {
+      console.error('intro failed to load', error);
+      introRunning = false;
+      hands.start();
+    });
+}
 
 async function activate(id) {
   const token = ++activationToken;
@@ -65,7 +81,6 @@ async function activate(id) {
   for (const other of loaded.values()) other.container.hidden = other !== slot;
   active = slot;
   slot.effect.resize(window.innerWidth, window.innerHeight);
-  hands.video.style.filter = slot.effect.cameraFilter ?? DEFAULT_CAMERA_FILTER;
   hands.setDemoScript(slot.effect.demoScript);
 }
 
@@ -77,9 +92,11 @@ function frame(nowMs) {
   const dt = Math.min(0.1, (nowMs - lastFrameMs) / 1000);
   lastFrameMs = nowMs;
   hands.update(nowMs);
-  if (active) {
+  if (active && !introRunning) {
     active.effect.update(nowMs, dt);
     active.effect.render();
+    const filter = active.effect.cameraFilter ?? DEFAULT_CAMERA_FILTER;
+    if (filter !== hands.video.style.filter) hands.video.style.filter = filter;
   }
   ui.update();
   tuning.update();
