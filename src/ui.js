@@ -27,6 +27,8 @@ export function createUI(hands) {
     <div class="sd-keys sd-hideable">H hide UI · F fullscreen · G tune gestures · D demo · M mouse · C camera</div>`;
   document.body.appendChild(root);
   const status = root.querySelector('.sd-status');
+  // ?clean starts with the UI hidden (screenshots, recordings)
+  if (new URLSearchParams(location.search).has('clean')) root.classList.add('hidden');
 
   window.addEventListener('keydown', (event) => {
     if (event.metaKey || event.ctrlKey || event.altKey) return;

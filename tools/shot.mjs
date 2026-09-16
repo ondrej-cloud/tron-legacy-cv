@@ -10,7 +10,7 @@
 //
 // The webcam is faked: .local/camera.mjpeg (a synthetic room, if present) or
 // the file given with --fake-video; `--fake-video none` uses Chrome's built-in
-// test pattern.
+// test pattern and `--fake-video off` runs with no camera at all (black background).
 
 import { createServer } from 'node:http';
 import { readFile, mkdir } from 'node:fs/promises';
@@ -71,13 +71,14 @@ const pagePath = options.page.replace(/^\.?\//, '');
 const url = `http://127.0.0.1:${port}/${pagePath}${options.query ? `?${options.query}` : ''}`;
 await mkdir(options.out, { recursive: true });
 
-const fakeVideo = options.fakeVideo !== 'none' && existsSync(resolve(ROOT, options.fakeVideo))
+const cameraOff = options.fakeVideo === 'off';
+const fakeVideo = !['none', 'off'].includes(options.fakeVideo) && existsSync(resolve(ROOT, options.fakeVideo))
   ? resolve(ROOT, options.fakeVideo) : null;
 const browser = await chromium.launch({
   channel: 'chrome',
   headless: true,
   args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist', '--enable-webgl',
-    '--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream',
+    ...(cameraOff ? [] : ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream']),
     ...(fakeVideo ? [`--use-file-for-fake-video-capture=${fakeVideo}`] : []),
     '--autoplay-policy=no-user-gesture-required'],
 });
@@ -121,7 +122,7 @@ await browser.close();
 server.close();
 
 console.log(`url:       ${url}`);
-console.log(`camera:    ${fakeVideo ?? 'chrome test pattern'}`);
+console.log(`camera:    ${cameraOff ? 'off' : fakeVideo ?? 'chrome test pattern'}`);
 console.log(`renderer:  ${renderer}`);
 console.log(`fps:       ${fps.toFixed(1)} (headless; real browser is usually higher)`);
 if (stats) console.log(`stats:     ${JSON.stringify(stats)}`);
