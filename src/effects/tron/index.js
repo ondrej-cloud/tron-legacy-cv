@@ -1,8 +1,9 @@
 // Tron: the Grid over your webcam. Hand gestures draw light-cycle walls,
 // switch each hand between TRON and CLU colours, summon and throw identity
 // discs that ricochet off the walls and each other, launch light cycles onto
-// the Grid floor, derezz everything into voxels and open a portal between
-// the hands, and digitize the person on camera with a laser (person
+// the Grid floor, swing light batons that cut walls and bat discs (two of
+// them rez a light cycle), derezz everything into voxels, open a portal
+// between the hands, and digitize the person on camera with a laser (person
 // segmentation); a holographic HUD shows what the hand tracker sees (the
 // rules are in controls.js).
 //
@@ -23,6 +24,7 @@ import { createVoxels } from './voxels.js';
 import { createFlashes } from './flashes.js';
 import { createDiscs } from './disc.js';
 import { createCycles } from './cycles.js';
+import { createBatons } from './baton.js';
 import { createDigitizer } from './digitize.js';
 import { createControls } from './controls.js';
 import { createHud } from './hud.js';
@@ -31,7 +33,7 @@ import { createDemo } from './demo.js';
 export const meta = {
   title: 'Tron',
   hint: 'point: light wall · rock: switch colour · ok: identity disc, flick to throw · '
-    + 'thumbs up: light cycle · peace: digitize · fist: derezz · both palms open: portal',
+    + 'thumbs up: light cycle · peace: digitize · shaka: light baton · fist: derezz · both palms open: portal',
 };
 
 const RENDER = {
@@ -69,11 +71,12 @@ export function createEffect({ container, hands }) {
   const walls = createLightWalls(view, teams);
   const voxels = createVoxels();
   const flashes = createFlashes(view);
-  const discs = createDiscs({ view, teams, walls, stage, voxels, flashes, log });
+  const batons = createBatons({ view, walls, voxels, flashes, log });
+  const discs = createDiscs({ view, teams, walls, batons, stage, voxels, flashes, log });
   const cycles = createCycles({ view, teams, stage, voxels, flashes, log });
   const digitizer = createDigitizer({ hands, view, voxels, flashes, log });
-  scene.add(stage.group, digitizer.group, cycles.group, walls.object, discs.group, voxels.mesh, flashes.group);
-  const controls = createControls({ hands, view, teams, walls, discs, cycles, digitizer, voxels, flashes, stage, log });
+  scene.add(stage.group, digitizer.group, cycles.group, walls.object, discs.group, batons.group, voxels.mesh, flashes.group);
+  const controls = createControls({ hands, view, teams, walls, discs, cycles, batons, digitizer, voxels, flashes, stage, log });
   const hud = createHud(container, { hands, view, teams, controls });
   const demo = createDemo();
 
@@ -167,6 +170,7 @@ export function createEffect({ container, hands }) {
         discCounts: { ...discs.counts },
         cycles: cycles.active,
         cycleCounts: { ...cycles.counts },
+        batons: { ...batons.counts, cycles: controls.counts.batonCycles },
         digitize: { active: digitizer.active, count: digitizer.count, segmenter: digitizer.segmenterStatus,
           runs: digitizer.segmenterRuns, masks: digitizer.maskFrames },
         portal: Number(controls.portal.strength.toFixed(2)),

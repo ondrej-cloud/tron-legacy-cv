@@ -1,13 +1,15 @@
 // Identity disc: an "ok" hand summons it, it stays at that palm, and a fast
 // flick throws it. In flight it spins and leaves a light trail; it ricochets
 // off the edges of the frame and off the light walls (a swept test, so a
-// fast disc can't tunnel through a thin wall), and two thrown discs bounce
-// off each other. Once the ricochets settle it homes back to its owner and
-// is caught by an open hand (a closed hand makes it circle and wait). If the
-// owner's hand is gone, the disc fades out. Each disc has its hand's colour.
+// fast disc can't tunnel through a thin wall), two thrown discs bounce off
+// each other, and a light baton bats a disc away. Once the ricochets settle
+// it homes back to its owner and is caught by an open hand (a closed hand
+// makes it circle and wait). If the owner's hand is gone, the disc fades
+// out. Each disc has its hand's colour.
 import * as THREE from 'three';
 import { additiveMaterial, uploadPrefix } from './gl.js';
 import { clamp, easeTowards } from './filters.js';
+import { BATON, distanceToSegment, sweptContains } from './baton.js';
 
 export const DISC = {
   radiusPerPalm: 0.72,      // disc radius relative to the palm length
@@ -27,6 +29,9 @@ export const DISC = {
   settleTime: 0.6,          // ... and until it hasn't hit anything for this long ...
   maxFreeFlight: 2.6,       // ... but no longer than this, then it homes in
   hitReach: 0.9,            // share of the disc's radius that collides
+  batonReach: 0.55,         // ... with a baton (the disc is seen at an angle)
+  batonRestitution: 0.9,
+  batonCooldown: 0.15,      // s before the same disc can be batted again
   homingSpeed: 1.9,
   homingTurn: [2.5, 10],    // steering rate (1/s) when homing starts .. one second later
   catchDistance: 0.07,
@@ -119,7 +124,7 @@ const trailFragment = /* glsl */`
 `;
 
 // `log(name)` records an action for the stats.
-export function createDiscs({ view, teams, walls, stage, voxels, flashes, log }) {
+export function createDiscs({ view, teams, walls, batons, stage, voxels, flashes, log }) {
   const group = new THREE.Group();
   const plane = new THREE.PlaneGeometry(2, 2);
   const slots = [];
@@ -151,7 +156,7 @@ export function createDiscs({ view, teams, walls, stage, voxels, flashes, log })
   }
 
   const discs = [];
-  const counts = { summoned: 0, thrown: 0, bounces: 0, wallHits: 0, clashes: 0, caught: 0, shattered: 0 };
+  const counts = { summoned: 0, thrown: 0, bounces: 0, wallHits: 0, clashes: 0, deflects: 0, caught: 0, shattered: 0 };
   const logFor = (name, disc) => log(`${name} ${disc.owner[0].toUpperCase()}`);
   const colorOf = (disc) => teams[disc.owner].color;
   const thrown = (disc) => disc.state === 'flying' || disc.state === 'returning';
@@ -176,6 +181,7 @@ export function createDiscs({ view, teams, walls, stage, voxels, flashes, log })
       flightTime: 0,
       bounces: 0,
       lastHitAt: -Infinity,
+      batonHitAt: -Infinity,
       lostFor: 0,
       trail: [],
     };
@@ -308,6 +314,7 @@ export function createDiscs({ view, teams, walls, stage, voxels, flashes, log })
     disc.y += disc.vy * dt;
     // a returning disc flies over the walls on its way home
     if (disc.state === 'flying') bounceOffWalls(disc, fromX, fromY, wallRuns);
+    bounceOffBatons(disc, fromX, fromY);
     ricochet(disc);
     disc.spin += DISC.flightSpin * dt;
     disc.squash = easeTowards(disc.squash, DISC.flightSquash, dt, 0.08);
@@ -397,6 +404,52 @@ export function createDiscs({ view, teams, walls, stage, voxels, flashes, log })
     sparks(contact.x, contact.y, normal.x, normal.y, colorOf(disc), 10);
     sparks(contact.x, contact.y, normal.x, normal.y, wallColor, 8, 0.7);
     walls.pulse(run.trail, run.along0 + Math.abs(along - shift - start), now);
+  }
+
+  // A light baton bats a flying disc away (one on its way home passes): the
+  // disc's velocity relative to the rod is reflected off the rod, with a
+  // little loss, so a swing adds to it. It counts if the disc touches the
+  // rod, flew across it, or the rod swept over the disc this frame.
+  function bounceOffBatons(disc, fromX, fromY) {
+    if (disc.state !== 'flying' || now - disc.batonHitAt < DISC.batonCooldown) return;
+    for (const baton of batons.sweeps()) {
+      const { a, b } = baton.current;
+      const point = { x: disc.x, y: disc.y };
+      const reach = disc.radius * DISC.batonReach + BATON.radius;
+      const touching = distanceToSegment(point, a, b) < reach;
+      const crossed = segmentsCross({ x: fromX, y: fromY }, point, a, b);
+      if (!touching && !crossed && !sweptContains(baton, point, reach)) continue;
+      const length = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+      let normal = { x: -(b.y - a.y) / length, y: (b.x - a.x) / length };
+      const relativeX = disc.vx - baton.velocity.x;
+      const relativeY = disc.vy - baton.velocity.y;
+      let closing = relativeX * normal.x + relativeY * normal.y;
+      // the normal points to the side the disc ends up on
+      if (closing > 0) {
+        normal = { x: -normal.x, y: -normal.y };
+        closing = -closing;
+      }
+      disc.vx -= (1 + DISC.batonRestitution) * closing * normal.x;
+      disc.vy -= (1 + DISC.batonRestitution) * closing * normal.y;
+      const speed = Math.hypot(disc.vx, disc.vy) || 1;
+      const limited = clamp(speed, DISC.minThrowSpeed, DISC.maxThrowSpeed * 1.2);
+      disc.vx *= limited / speed;
+      disc.vy *= limited / speed;
+      // out of the rod, on the side it now flies to
+      const t = clamp(((disc.x - a.x) * (b.x - a.x) + (disc.y - a.y) * (b.y - a.y)) / (length * length), 0, 1);
+      const contact = { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
+      disc.x = contact.x + normal.x * reach * 1.05;
+      disc.y = contact.y + normal.y * reach * 1.05;
+      disc.batonHitAt = now;
+      disc.lastHitAt = now;
+      disc.flash = 0.6;
+      counts.deflects++;
+      logFor('deflect', disc);
+      flashes.spawn({ x: contact.x, y: contact.y, size: 0.1, duration: 0.4, color: baton.color, glint: 1.2 });
+      sparks(contact.x, contact.y, normal.x, normal.y, colorOf(disc), 10, 1.2);
+      sparks(contact.x, contact.y, -normal.x, -normal.y, baton.color, 6, 0.8);
+      return;
+    }
   }
 
   // Thrown discs that meet bounce off each other: an elastic collision of
@@ -502,6 +555,12 @@ export function createDiscs({ view, teams, walls, stage, voxels, flashes, log })
     summon,
     throwDisc,
     shatter,
+    // put away: a held disc fades out of the hand (a baton takes its place)
+    dismiss(disc) {
+      if (disc.state !== 'held') return;
+      flashes.spawn({ x: disc.x, y: disc.y, size: disc.radius * 1.4, duration: 0.35, color: colorOf(disc), glint: 0.3 });
+      startFading(disc);
+    },
     // the disc a hand owns, wherever it is (not one that is already fading)
     ownedBy(owner) {
       return discs.find((disc) => disc.owner === owner && disc.state !== 'fading' && disc.state !== 'gone');
@@ -560,4 +619,14 @@ function stripIndices(points) {
     indices.set([a, a + 1, a + 3, a, a + 3, a + 2], index * 6);
   }
   return indices;
+}
+
+// Do segments p0-p1 and a-b cross?
+function segmentsCross(p0, p1, a, b) {
+  const side = (o, u, v) => (u.x - o.x) * (v.y - o.y) - (u.y - o.y) * (v.x - o.x);
+  const d1 = side(a, b, p0);
+  const d2 = side(a, b, p1);
+  const d3 = side(p0, p1, a);
+  const d4 = side(p0, p1, b);
+  return d1 * d2 < 0 && d3 * d4 < 0;
 }

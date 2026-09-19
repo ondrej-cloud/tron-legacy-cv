@@ -110,6 +110,8 @@ function classify(extended, touch, thumbUp, indexFolded) {
   if (touch.index < THRESHOLDS.touchOn && !indexFolded) return middle && ring && pinky ? 'ok' : 'pinch';
   if (raised === 0) return thumbUp ? 'thumbsUp' : 'fist';
   if (raised === 1 && index) return 'point';
+  // pinky alone, usually with the thumb out: the "hang loose" sign
+  if (raised === 1 && pinky) return 'shaka';
   if (raised === 2 && index && middle) return 'peace';
   if (raised === 2 && index && pinky) return 'rock';
   if (raised === 4) return 'open';
@@ -126,6 +128,7 @@ export const POSES = {
   fist:   { curl: { thumb: 0.85, index: 1, middle: 1, ring: 1, pinky: 1 }, touch: {} },
   point:  { curl: { thumb: 0.85, index: 0, middle: 1, ring: 1, pinky: 1 }, touch: {} },
   peace:  { curl: { thumb: 0.85, index: 0, middle: 0, ring: 1, pinky: 1 }, touch: {} },
+  shaka:  { curl: { thumb: -0.3, index: 1, middle: 1, ring: 1, pinky: 0 }, touch: {} },
   ok:     { curl: { thumb: 0.3, index: 0.45, middle: 0, ring: 0, pinky: 0 }, touch: { index: 1 } },
   pinch:  { curl: { thumb: 0.3, index: 0.4, middle: 0.55, ring: 0.7, pinky: 0.8 }, touch: { index: 1 } },
   tapMiddle: { curl: { thumb: 0.3, index: 0, middle: 0.45, ring: 0, pinky: 0 }, touch: { middle: 1 } },

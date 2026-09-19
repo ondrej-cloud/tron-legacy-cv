@@ -1,4 +1,4 @@
-// Scripted hands for demo mode: a 28 s loop that runs through every gesture.
+// Scripted hands for demo mode: a 38 s loop that runs through every gesture.
 // The hands are procedural (gestures.js) and go through the same analysis as
 // camera hands, so this exercises the real gesture rules. Like a real hand,
 // the palm stays put while the fingers change pose: keyframes place the palm
@@ -25,14 +25,26 @@
 //         20.3   right hand peace: the digitizing laser charges at the hand,
 //                sweeps down (20.8 - 22.1) turning the person into orange
 //                TRON lines, holds (22.1 - 23.6), sweeps back up (23.6 - 24.6)
-//         24.8   right hand rock: back to TRON cyan
-//   25.7 - 28.0  both palms open again: portal (continues into the next loop)
+//   24.9 - 25.9  right hand draws a vertical light wall
+//         25.5   left hand makes "ok": a cyan disc
+//         26.6   right hand shaka: an orange light baton rezzes (~26.9 - 27.2)
+//   27.3 - 27.6  it swings left through the wall and cuts a gap in it
+//         28.2   left hand flicks: the disc flies through the gap and the
+//                baton bats it away (~28.6); it ricochets and comes home
+//         31.6   left hand shaka: the disc is put away, a cyan baton rezzes
+//   32.0 - 32.5  both hands bring their batons together end to end: linked
+//                (~32.6); pulled apart (33.0 - 33.4) they rez a big light
+//                cycle, orange with cyan wheels (~33.1)
+//         34.3   right hand rock: back to TRON cyan
+//   35.3 - 38.0  both palms open again: portal (continues into the next loop)
 import { POSES, blendPoses, poseToLandmarks } from '../../gestures.js';
 
-export const DEMO_LOOP = 28;
+export const DEMO_LOOP = 38;
 const PALM = 0.13;   // palm length, as hands.js uses for procedural hands
 const PALM_POINTS = [0, 5, 9, 13, 17];
 const ROLL = { left: -0.08, right: 0.08 };
+// batons held level: hands turned outwards so thumb and pinky line up
+const BATON_ROLL = { left: -0.8, right: 0.8 };
 // a thumbs-up needs the thumb spread out and the hand turned so the thumb points up
 const THUMBS_UP_ROLL = { left: -0.8, right: 0.8 };
 
@@ -95,11 +107,28 @@ const RIGHT = [
   key(20.05, 0.76, 0.5, 'peace'),
   key(20.6, 0.76, 0.5, 'peace'),
   key(20.9, 0.78, 0.56, 'open'),          // rests at the side while the laser scans
-  key(24.4, 0.78, 0.58, 'open'),
-  key(24.65, 0.74, 0.55, 'rock'),
-  key(25.1, 0.74, 0.55, 'rock'),
-  key(25.3, 0.72, 0.6, 'open'),
-  key(25.9, 0.66, 0.64, 'open'),
+  key(24.3, 0.78, 0.58, 'open'),
+  tip(24.6, 0.64, 0.3, 'open'),
+  tip(24.85, 0.64, 0.3, 'point'),
+  ...path(25.05, 0.5, [[0.64, 0.3], [0.64, 0.72]]),
+  tip(26.05, 0.64, 0.72, 'point'),
+  key(26.35, 0.8, 0.5, 'open'),
+  key(26.6, 0.8, 0.5, 'shaka'),           // a baton
+  key(27.3, 0.8, 0.5, 'shaka'),
+  key(27.6, 0.52, 0.5, 'shaka', { ease: 'linear' }),   // the swing: cuts the wall
+  key(28.0, 0.76, 0.5, 'shaka'),          // holds it out for the disc
+  key(30.9, 0.76, 0.5, 'shaka'),
+  key(31.5, 0.72, 0.55, 'shaka', { roll: BATON_ROLL.right }),
+  key(32.0, 0.72, 0.55, 'shaka', { roll: BATON_ROLL.right }),
+  key(32.5, 0.54, 0.55, 'shaka', { roll: BATON_ROLL.right }),   // end to end with the other baton
+  key(33.0, 0.54, 0.55, 'shaka', { roll: BATON_ROLL.right }),
+  key(33.4, 0.68, 0.55, 'shaka', { roll: BATON_ROLL.right }),   // pulled apart: a light cycle
+  key(33.7, 0.7, 0.56, 'open'),
+  key(34.0, 0.72, 0.56, 'open'),
+  key(34.25, 0.72, 0.56, 'rock'),
+  key(34.7, 0.72, 0.56, 'rock'),
+  key(34.9, 0.7, 0.6, 'open'),
+  key(35.5, 0.66, 0.64, 'open'),
   key(DEMO_LOOP, 0.635, 0.62, 'open'),
 ];
 
@@ -124,7 +153,21 @@ const LEFT = [
   key(15.5, 0.26, 0.56, 'thumbsUp', { roll: THUMBS_UP_ROLL.left }),
   key(16.4, 0.26, 0.56, 'thumbsUp', { roll: THUMBS_UP_ROLL.left }),
   hidden(16.5),
-  key(25.5, 0.34, 0.66, 'open'),
+  key(25.2, 0.3, 0.52, 'open'),
+  key(25.45, 0.3, 0.52, 'ok'),
+  key(27.95, 0.3, 0.52, 'ok'),
+  key(28.1, 0.28, 0.52, 'ok'),            // wind-up ...
+  key(28.35, 0.42, 0.52, 'ok', { ease: 'linear' }),   // ... and a flick through the gap
+  key(28.55, 0.4, 0.52, 'open'),
+  key(29.2, 0.3, 0.52, 'open'),           // open, so the disc comes home to it
+  key(31.3, 0.3, 0.55, 'open'),
+  key(31.55, 0.3, 0.55, 'shaka', { roll: BATON_ROLL.left }),
+  key(32.0, 0.28, 0.55, 'shaka', { roll: BATON_ROLL.left }),
+  key(32.5, 0.46, 0.55, 'shaka', { roll: BATON_ROLL.left }),
+  key(33.0, 0.46, 0.55, 'shaka', { roll: BATON_ROLL.left }),
+  key(33.4, 0.32, 0.55, 'shaka', { roll: BATON_ROLL.left }),
+  hidden(33.6),
+  key(35.3, 0.34, 0.66, 'open'),
   key(DEMO_LOOP, 0.365, 0.62, 'open'),
 ];
 

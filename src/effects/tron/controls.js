@@ -1,6 +1,6 @@
 // Gestures -> actions. Reads the debounced gestures and finger analysis from
-// hands.js and drives the walls, the discs, the light cycles, derezz and the
-// portal. Each hand has its own team colour.
+// hands.js and drives the walls, the discs, the light cycles, the batons,
+// derezz and the portal. Each hand has its own team colour.
 //
 //   point                     draw a light wall from the index fingertip
 //   rock (index + pinky)      switch this hand's team (TRON cyan <-> CLU orange)
@@ -8,6 +8,9 @@
 //   flick, or open the ok     throw it; it comes back to an open hand
 //   thumbs up                 launch a light cycle onto the Grid floor
 //   peace                     the digitizing laser: the person turns into TRON lines
+//   shaka (thumb + pinky)     a light baton in the hand: swing it to cut walls and bat
+//                             discs; two batons joined end to end, then pulled apart,
+//                             rez a light cycle
 //   fist                      derezz wave from the fist: walls, cycles and your own disc
 //   both palms open, facing   portal between the hands (not while you have a disc out)
 //
@@ -15,6 +18,7 @@
 // on top of the tracker's own debounce, and drawing survives short dropouts.
 import { OneEuroFilter, PointFilter, VelocityWindow, clamp, easeTowards } from './filters.js';
 import { WALL } from './walls.js';
+import { BATON } from './baton.js';
 
 export const CONTROLS = {
   pointHoldMs: 60,        // pointing must hold this long before it draws
@@ -37,6 +41,12 @@ export const CONTROLS = {
   rockCooldownMs: 600,
   thumbsUpHoldMs: 150,
   thumbsUpCooldownMs: 1200,
+  shakaHoldMs: 150,
+  shakaGraceMs: 150,      // a baton survives a gesture dropout this long
+  batonJoinDistance: 0.06,   // view units between the ends of two batons that join them ...
+  batonJoinHoldMs: 150,      // ... held this long
+  batonPullApart: 0.12,   // then the palms moving this much further apart rez a light cycle
+  batonCycleScale: 1.5,
   peaceHoldMs: 200,
   peaceCooldownMs: 6000,  // from one digitize to the next (one lasts 5 s)
   portalHoldMs: 150,
@@ -49,7 +59,7 @@ export const CONTROLS = {
 const PALM_POINTS = [0, 5, 9, 13, 17];
 
 // `log(name)` records an action for the stats.
-export function createControls({ hands, view, teams, walls, discs, cycles, digitizer, voxels, flashes, stage, log }) {
+export function createControls({ hands, view, teams, walls, discs, cycles, batons, digitizer, voxels, flashes, stage, log }) {
   const states = { left: createHandState('left'), right: createHandState('right') };
   const discHands = { left: discHand(), right: discHand() };
   const waves = [];
@@ -58,7 +68,8 @@ export function createControls({ hands, view, teams, walls, discs, cycles, digit
     readySinceMs: 0, lastReadyMs: -Infinity, opened: 0,
   };
   const tethers = [{ x: 0, y: 0, strength: 0 }, { x: 0, y: 0, strength: 0 }];
-  const counts = { derezz: 0, teamSwitches: 0 };
+  const counts = { derezz: 0, teamSwitches: 0, batonCycles: 0 };
+  const join = { linked: false, touchSinceMs: 0, palmDistance: 0, point: { x: 0, y: 0 } };
   const initial = (id) => id[0].toUpperCase();
   let time = 0;
 
@@ -261,6 +272,90 @@ export function createControls({ hands, view, teams, walls, discs, cycles, digit
     if (digitizer.start(hand.id, emitter, teams[hand.id].color)) state.lastDigitize = time;
   }
 
+  // A shaka holds a baton along the thumb-tip to pinky-tip axis, centred on
+  // the palm and reaching a little past both tips; a disc in that hand is
+  // put away. After two batons became a cycle, the shaka has to be released
+  // before it rezzes a new one.
+  function updateBaton(state, hand, nowMs) {
+    const shaka = hand.visible && hand.gesture === 'shaka';
+    if (!shaka) state.batonSpent = false;
+    if (shaka) state.lastShakaMs = nowMs;
+    const baton = batons.get(hand.id);
+    const wanted = shaka && !state.batonSpent && (baton || nowMs - hand.gestureSince >= CONTROLS.shakaHoldMs);
+    if (wanted) {
+      const disc = discs.ownedBy(hand.id);
+      if (disc?.state === 'held') discs.dismiss(disc);
+      const thumb = toView(hand.tips.thumb, {});
+      const pinky = toView(hand.tips.pinky, {});
+      const axis = { x: pinky.x - thumb.x, y: pinky.y - thumb.y };
+      const length = Math.hypot(axis.x, axis.y) || 1;
+      const reach = (point) => Math.abs(((point.x - state.palm.x) * axis.x + (point.y - state.palm.y) * axis.y) / length);
+      batons.hold(hand.id, state.palm, axis, Math.max(reach(thumb), reach(pinky)) + BATON.margin, teams[hand.id]);
+    } else if (baton && nowMs - state.lastShakaMs > CONTROLS.shakaGraceMs) {
+      batons.release(hand.id);
+    }
+  }
+
+  // Two batons touching end to end link up; pulling the hands apart then
+  // rezzes a light cycle from them, like Sam's. It takes the colour of the
+  // baton that was there first, with the other's colour on its wheels.
+  function updateBatonJoin(nowMs) {
+    const left = batons.get('left');
+    const right = batons.get('right');
+    if (!left || !right || left.state !== 'held' || right.state !== 'held') {
+      join.linked = false;
+      join.touchSinceMs = 0;
+      batons.linked = false;
+      return;
+    }
+    const palmDistance = Math.hypot(states.right.palm.x - states.left.palm.x, states.right.palm.y - states.left.palm.y);
+    if (!join.linked) {
+      let closest = null;
+      for (const a of [left.current.a, left.current.b]) {
+        for (const b of [right.current.a, right.current.b]) {
+          const distance = Math.hypot(a.x - b.x, a.y - b.y);
+          if (!closest || distance < closest.distance) closest = { distance, x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+        }
+      }
+      if (closest.distance > CONTROLS.batonJoinDistance) {
+        join.touchSinceMs = 0;
+        return;
+      }
+      join.touchSinceMs ||= nowMs;
+      if (nowMs - join.touchSinceMs < CONTROLS.batonJoinHoldMs) return;
+      join.linked = true;
+      join.point = { x: closest.x, y: closest.y };
+      join.palmDistance = palmDistance;
+      batons.linked = true;
+      log('batons linked');
+      flashes.spawn({ x: closest.x, y: closest.y, size: 0.12, duration: 0.5, color: left.color, glint: 1.2 });
+      return;
+    }
+    // while linked, the joint follows the hands
+    join.point = {
+      x: (states.left.palm.x + states.right.palm.x) / 2,
+      y: (states.left.palm.y + states.right.palm.y) / 2,
+    };
+    if (palmDistance - join.palmDistance < CONTROLS.batonPullApart) return;
+    const [first, second] = left.born <= right.born ? [left, right] : [right, left];
+    const firstTeam = teams[first.id];
+    const secondTeam = teams[second.id];
+    cycles.launch('both', join.point, firstTeam, {
+      scale: CONTROLS.batonCycleScale,
+      accent: secondTeam.index !== firstTeam.index ? secondTeam.color : null,
+    });
+    batons.consume('left');
+    batons.consume('right');
+    batons.linked = false;
+    join.linked = false;
+    join.touchSinceMs = 0;
+    states.left.batonSpent = true;
+    states.right.batonSpent = true;
+    states.left.lastLaunch = time;
+    states.right.lastLaunch = time;
+    counts.batonCycles++;
+  }
+
   // catching a disc means opening your hands, which mustn't open the portal
   function portalReady(hand) {
     return hand.visible && hand.palmFacing && hand.gesture !== 'ok'
@@ -353,6 +448,7 @@ export function createControls({ hands, view, teams, walls, discs, cycles, digit
     if (disc?.state === 'held') return 'DISC ARMED · FLICK';
     if (disc?.state === 'flying') return 'DISC THROWN';
     if (disc?.state === 'returning') return discHands[hand.id].open ? 'CATCH' : 'OPEN HAND TO CATCH';
+    if (batons.get(hand.id)) return join.linked ? 'BATONS LINKED · PULL APART' : 'BATON';
     return '';
   }
 
@@ -373,7 +469,10 @@ export function createControls({ hands, view, teams, walls, discs, cycles, digit
         updateRock(state, hand, nowMs);
         updateThumbsUp(state, hand, nowMs);
         updatePeace(state, hand, nowMs);
+        updateBaton(state, hand, nowMs);
       }
+      updateBatonJoin(nowMs);
+      batons.update(time, dt);
       updatePortal(nowMs, dt);
       updateWaves();
       discs.update(time, dt, discHands);
@@ -407,6 +506,8 @@ function createHandState(id) {
     lastTeamSwitch: -Infinity,
     lastLaunch: -Infinity,
     lastDigitize: -Infinity,
+    lastShakaMs: -Infinity,
+    batonSpent: false,
     action: '',
   };
 }

@@ -6,8 +6,9 @@
 // translucent ribbon extruded up and slightly to the right (a wall seen from
 // a little above), with a bright top edge and a white-hot leading edge, in
 // the colour of the hand that draws it. Walls fade after a few seconds, the
-// oldest go first when there is too much, and thrown discs bounce off them
-// (runs() and pulse()).
+// oldest go first when there is too much, thrown discs bounce off them
+// (runs() and pulse()), and derezz waves and light batons break them
+// (shatterWhere()); a freshly broken end glows for a moment.
 import * as THREE from 'three';
 import { additiveMaterial, quadIndices, uploadPrefix } from './gl.js';
 import { createRibbon } from './ribbon.js';
@@ -34,6 +35,7 @@ export const WALL = {
   pulseSpeed: 1.1,          // view units/s, the flash running along a wall a disc hit
   pulseWidth: 0.03,
   pulseTime: 0.7,           // s
+  cutGlow: 0.8,             // s a freshly cut end of wall stays hot
 };
 
 const MAX_SAMPLES = Math.ceil(WALL.maxLength / WALL.spacing);
@@ -230,15 +232,29 @@ export function createLightWalls(view, teams) {
   // `origin`; `onShatter` gets each sample and the extrusion vector.
   function shatter(origin, radius, bornBefore, onShatter, now) {
     const radiusSquared = radius * radius;
+    shatterWhere((sample) => sample.born <= bornBefore
+      && (sample.x - origin.x) ** 2 + (sample.y - origin.y) ** 2 <= radiusSquared, onShatter, now);
+  }
+
+  // Shatters every visible wall sample for which `test(sample, extrude)` is
+  // true; `onShatter` gets each sample and the extrusion vector.
+  function shatterWhere(test, onShatter, now) {
     for (const trail of trails) {
-      for (const sample of trail.samples) {
-        if (sample.gone || sample.born > bornBefore) continue;
-        const dx = sample.x - origin.x;
-        const dy = sample.y - origin.y;
-        if (dx * dx + dy * dy > radiusSquared) continue;
+      const samples = trail.samples;
+      let broke = false;
+      for (const sample of samples) {
+        if (sample.gone || sampleAlpha(sample, now) <= 0 || !test(sample, extrude)) continue;
         sample.gone = true;
+        broke = true;
         if (sample.dieAt === Infinity) livingSamples--;
         onShatter(sample, extrude);
+      }
+      if (!broke) continue;
+      // the ends left standing next to a break glow for a moment
+      for (let index = 0; index < samples.length; index++) {
+        const sample = samples[index];
+        if (sample.gone) continue;
+        if (samples[index - 1]?.gone || samples[index + 1]?.gone) sample.cutAt = now;
       }
       // a wall still being drawn carries on from where the head is now
       const last = lastSample(trail);
@@ -354,8 +370,9 @@ export function createLightWalls(view, teams) {
       if (edgeCount < MAX_EDGES && alpha > 0) writeEdge(edgeCount++, point, teamIndex, heat, alpha);
     };
     const hasPulses = pulses.length > 0;
+    const cutHeat = (point) => (point.cutAt === undefined ? 0 : 1 - smoothstep(0, WALL.cutGlow, now - point.cutAt));
     const end = (trail, point, alpha, team) => {
-      const fresh = 1 - smoothstep(0, WALL.hotTime, now - point.born);
+      const fresh = Math.max(1 - smoothstep(0, WALL.hotTime, now - point.born), cutHeat(point));
       const heat = hasPulses ? Math.max(fresh, pulseHeat(trail, point.along, now)) : fresh;
       return {
         base: point,
@@ -376,6 +393,10 @@ export function createLightWalls(view, teams) {
         const alphaB = sampleAlpha(b, now);
         if (alphaA <= 0 && alphaB <= 0) continue;
         ribbon.quad(end(trail, a, alphaA, a.team), end(trail, b, alphaB, b.team));
+      }
+      for (const sample of samples) {
+        const heat = sample.gone ? 0 : cutHeat(sample);
+        if (heat > 0) addEdge(sample, sample.team, heat, sampleAlpha(sample, now));
       }
       const first = samples[0];
       const last = lastSample(trail);
@@ -417,7 +438,11 @@ export function createLightWalls(view, teams) {
     steer,
     finish,
     shatter,
+    shatterWhere,
     runs,
+    colorOf(sample) {
+      return teams.colors[sample.team];
+    },
     pulse,
     update(now) {
       time.value = now;

@@ -68,7 +68,7 @@ function createHand(id) {
     palmFacing: false,
     roll: 0,            // 0 = fingers up, positive = tilted right
     size: 0,            // palm length as a fraction of the viewport height
-    gesture: 'none',    // debounced: open, fist, point, peace, rock, ok, pinch, thumbsUp, three, other
+    gesture: 'none',    // debounced: open, fist, point, peace, rock, shaka, ok, pinch, thumbsUp, three, other
     previousGesture: 'none',
     gestureSince: 0,
     gestureChanged: false, // true for one update() when `gesture` changes

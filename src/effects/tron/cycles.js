@@ -17,7 +17,7 @@ export const CYCLE = {
   speed: 1.4,              // floor units/s
   rideTime: [3.8, 4.4],    // s on the floor before it derezzes
   dropTime: 0.45,          // s from the palm to the floor
-  startDepth: { left: 2.0, right: 2.7 },   // the two hands' cycles ride at different depths
+  startDepth: { left: 2.0, right: 2.7, both: 2.2 },   // the two hands' cycles ride at different depths
   depthRange: [1.7, 3.6],
   sideMargin: 0.12,        // view units kept clear at the sides of the frame
   laneGap: 0.04,           // each hand's cycles keep to their half of the floor, this far from the middle
@@ -60,8 +60,11 @@ export function createCycles({ view, teams, stage, voxels, flashes, log }) {
 
   const random = (range) => range[0] + Math.random() * (range[1] - range[0]);
 
-  // palm: view units; team: the launching hand's team
-  function launch(owner, palm, team) {
+  // owner: the launching hand, or 'both' for a cycle rezzed from two batons
+  // (it rides the whole floor); palm: where it appears, in view units; team:
+  // the owner's team. options.scale makes a bigger bike, options.accent
+  // colours its wheels.
+  function launch(owner, palm, team, { scale = 1, accent = null } = {}) {
     while (cycles.filter((cycle) => cycle.state !== 'gone').length >= CYCLE.maxCycles) {
       derezz(cycles.find((cycle) => cycle.state !== 'gone'));
     }
@@ -71,13 +74,15 @@ export function createCycles({ view, teams, stage, voxels, flashes, log }) {
     const x = stage.gridX(palm.x, depth);
     const cycle = {
       owner,
+      scale,
       teamIndex: team.index,
       color: team.color.clone(),
+      accent: (accent ?? team.color).clone(),
       state: 'drop',
       start: now,
       x, z: stage.gridZ(depth), h: height, dropFrom: height,
       // set off across the frame, towards the middle of the hand's lane
-      dir: { x: owner === 'left' ? 1 : -1, z: 0 },
+      dir: { x: owner === 'left' || (owner === 'both' && palm.x < 0) ? 1 : -1, z: 0 },
       rideUntil: Infinity,
       nextTurn: Infinity,
       turns: 0,
@@ -88,7 +93,7 @@ export function createCycles({ view, teams, stage, voxels, flashes, log }) {
     cycles.push(cycle);
     counts.launched++;
     log(`cycle ${owner[0].toUpperCase()}`);
-    flashes.spawn({ x: palm.x, y: palm.y, size: 0.12, duration: 0.45, color: cycle.color, glint: 0.8 });
+    flashes.spawn({ x: palm.x, y: palm.y, size: 0.12, duration: 0.45, color: cycle.color, glint: 0.8, intensity: 0.7 });
     return cycle;
   }
 
@@ -107,6 +112,7 @@ export function createCycles({ view, teams, stage, voxels, flashes, log }) {
   // the stretch of floor (view x) a hand's cycles ride in
   function lane(cycle) {
     const edge = view.aspect / 2 - CYCLE.sideMargin;
+    if (cycle.owner === 'both') return [-edge, edge];
     return cycle.owner === 'left' ? [-edge, -CYCLE.laneGap] : [CYCLE.laneGap, edge];
   }
 
@@ -169,8 +175,9 @@ export function createCycles({ view, teams, stage, voxels, flashes, log }) {
   function bikeSegments(cycle) {
     const forward = { x: cycle.dir.x, z: cycle.dir.z };
     const side = { x: -forward.z, z: forward.x };
-    const point = (u, h, s) => stage.project(cycle.x + forward.x * u + side.x * s, cycle.h + h,
-      cycle.z + forward.z * u + side.z * s);
+    const size = cycle.scale;
+    const point = (u, h, s) => stage.project(cycle.x + (forward.x * u + side.x * s) * size, cycle.h + h * size,
+      cycle.z + (forward.z * u + side.z * s) * size);
     // seen end-on the lines pile up on each other, so they dim
     const sideOn = 0.3 + 0.7 * Math.abs(forward.x);
     const segments = [];
@@ -183,6 +190,7 @@ export function createCycles({ view, teams, stage, voxels, flashes, log }) {
             a: point(center + Math.cos(a0) * radius, WHEEL_RADIUS + Math.sin(a0) * radius, 0),
             b: point(center + Math.cos(a1) * radius, WHEEL_RADIUS + Math.sin(a1) * radius, 0),
             bright: (radius === WHEEL_RADIUS ? 1.0 : 0.55) * sideOn,
+            accent: true,
           });
         }
       }
@@ -238,7 +246,7 @@ export function createCycles({ view, teams, stage, voxels, flashes, log }) {
         if (base.depth < CYCLE.nearClip || !within(base)) continue;
         sample.gone = true;
         if (Math.round(sample.along / CYCLE.sampleSpacing) % 2) continue;
-        const top = stage.project(sample.x, CYCLE.wallHeight, sample.z);
+        const top = stage.project(sample.x, CYCLE.wallHeight * cycle.scale, sample.z);
         voxels.spawn({
           x: (base.x + top.x) / 2, y: (base.y + top.y) / 2,
           vx: (base.x - origin.x) * 0.4 + (Math.random() - 0.5) * 0.1, vy: 0.05 + Math.random() * 0.15,
@@ -286,7 +294,7 @@ export function createCycles({ view, teams, stage, voxels, flashes, log }) {
       const fade = cycle.state === 'gone' ? 1 - smoothstep(0, CYCLE.wallFade, now - cycle.goneAt) : 1;
       const end = (point) => {
         const base = stage.project(point.x, 0, point.z);
-        const top = stage.project(point.x, CYCLE.wallHeight, point.z);
+        const top = stage.project(point.x, CYCLE.wallHeight * cycle.scale, point.z);
         const heat = 1 - smoothstep(0, CYCLE.hotTime, now - point.born);
         const near = smoothstep(CYCLE.nearClip, CYCLE.nearClip + 0.5, base.depth);
         return { base, top, alpha: fade * near, heat, team: cycle.teamIndex, along: point.along * 0.5 };
@@ -310,7 +318,8 @@ export function createCycles({ view, teams, stage, voxels, flashes, log }) {
         const depth = Math.min(segment.a.depth, segment.b.depth);
         if (depth < CYCLE.nearClip) continue;
         const width = Math.min(2.2, 1.0 + 0.6 / depth);
-        lines.add(segment.a, segment.b, segment.hot ? white : cycle.color, segment.bright * appear, width);
+        const color = segment.hot ? white : segment.accent ? cycle.accent : cycle.color;
+        lines.add(segment.a, segment.b, color, segment.bright * appear, width);
       }
     }
     ribbon.end();

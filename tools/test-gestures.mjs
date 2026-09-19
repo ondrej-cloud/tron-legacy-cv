@@ -4,7 +4,7 @@
 import { POSES, poseToLandmarks, analyzeHand, blendPoses } from '../src/gestures.js';
 
 const EXPECTED = {
-  open: 'open', fist: 'fist', point: 'point', peace: 'peace', ok: 'ok', pinch: 'pinch',
+  open: 'open', fist: 'fist', point: 'point', peace: 'peace', ok: 'ok', pinch: 'pinch', shaka: 'shaka',
   // touching a fingertip bends that finger, so the hand stops counting as open
   tapMiddle: 'open', tapRing: 'open', tapPinky: 'three',
 };
