@@ -233,54 +233,78 @@ function drawDisc(context, x, y, radius, alpha, s, spin) {
   context.restore();
 }
 
+// Where a disc held in the OK hand sits, for a hand placed at (x, y).
+const discRest = (x, y, size) => ({ x: x + size * 1.2, y: y - size * 0.85 });
+
 function okScene(context, t, w, h, s) {
   const size = h * 0.28;
-  const flickAt = 1.55;
-  const toOk = ramp(t, 0.1, 0.5) * (1 - ramp(t, flickAt, flickAt + 0.12));
+  const toOk = ramp(t, 0.1, 0.5) * (1 - ramp(t, 3.15, 3.5));
   const pose = blendPoses(POSES.open, POSES.ok, toOk);
-  // a small wind-up, then a flick towards the upper right
-  const windUp = ramp(t, 1.25, flickAt) * (1 - ramp(t, flickAt, flickAt + 0.1));
-  const flick = ramp(t, flickAt, flickAt + 0.14) * (1 - ramp(t, 2.6, 3.3));
-  const handX = w * (0.3 - 0.03 * windUp + 0.08 * flick);
-  const handY = h * (0.64 + 0.04 * windUp - 0.06 * flick);
-  const points = hand(context, pose, { x: handX, y: handY, size, roll: 0.1 - 0.3 * flick }, { scale: s });
+  const handX = w * 0.3;
+  const handY = h * 0.64;
+  const points = hand(context, pose, { x: handX, y: handY, size, roll: 0.1 }, { scale: s });
   if (toOk > 0.8) {
     // the "O" between thumb and index
     const ring = { x: (points[4].x + points[8].x) / 2, y: (points[4].y + points[8].y) / 2 };
     glowDot(context, ring.x, ring.y, 6 * s, CYAN, 0.7 * (toOk - 0.8) / 0.2);
   }
+  // the disc rezzes in beside the hand: a flash, then the rings grow out of it
+  const rest = discRest(handX, handY, size);
+  const radius = h * 0.1;
+  const rez = ramp(t, 0.55, 1.1);
+  const gone = ramp(t, 2.9, 3.25);
+  const alpha = rez * (1 - gone);
+  if (alpha <= 0) return;
+  const bob = Math.sin(t * 3) * h * 0.012;
+  if (t < 0.9) glowDot(context, rest.x, rest.y, 12 * s, WHITE, Math.sin(Math.PI * ramp(t, 0.5, 0.9)));
+  drawDisc(context, rest.x, rest.y + bob, radius * (0.3 + 0.7 * rez), alpha, s, t * 4);
+}
 
-  const radius = h * 0.095;
-  const summon = ramp(t, 0.55, 1.05);
-  const rest = { x: handX + size * 1.25, y: handY - size * 0.85 };
-  if (t < flickAt) {
-    if (summon > 0) drawDisc(context, rest.x, rest.y, radius * summon, summon, s, t * 4);
+// Bounces a coordinate between lo and hi, like a disc off two walls.
+function reflect(value, lo, hi) {
+  const span = hi - lo;
+  const u = (((value - lo) % (2 * span)) + 2 * span) % (2 * span);
+  return lo + (u < span ? u : 2 * span - u);
+}
+
+function flickScene(context, t, w, h, s) {
+  const size = h * 0.26;
+  const throwAt = 1.05;
+  const catchAt = 2.75;
+  // a wind-up, then the hand whips sideways and opens
+  const windUp = ramp(t, 0.7, throwAt) * (1 - ramp(t, throwAt, throwAt + 0.08));
+  const whip = ramp(t, throwAt, throwAt + 0.12) * (1 - ramp(t, 2.2, catchAt));
+  const pose = blendPoses(POSES.ok, POSES.open, ramp(t, throwAt, throwAt + 0.1) * (1 - ramp(t, catchAt, catchAt + 0.25)));
+  const handX = w * (0.26 - 0.04 * windUp + 0.12 * whip);
+  const handY = h * 0.64;
+  hand(context, pose, { x: handX, y: handY, size, roll: 0.1 - 0.25 * windUp + 0.45 * whip }, { scale: s });
+
+  const radius = h * 0.085;
+  const rest = discRest(handX, handY, size);
+  if (t < throwAt || t > catchAt + 0.05) {
+    drawDisc(context, rest.x, rest.y, radius, 1, s, t * 4);
+    if (t > catchAt && t < catchAt + 0.3) glowDot(context, rest.x, rest.y, 12 * s, CYAN, 1 - (t - catchAt) / 0.3);
     return;
   }
-  // thrown: straight lines between bounces off the glyph's edges
-  let x = rest.x;
-  let y = rest.y;
-  let vx = w * 1.1;
-  let vy = -h * 0.9;
-  let remaining = t - flickAt;
-  let lastBounce = null;
-  const step = 1 / 240;
-  while (remaining > 0) {
-    const dt = Math.min(step, remaining);
-    x += vx * dt;
-    y += vy * dt;
-    if (x > w - radius) { x = w - radius; vx = -vx; lastBounce = { x: w, y }; }
-    if (x < radius) { x = radius; vx = -vx; lastBounce = { x: 0, y }; }
-    if (y < radius) { y = radius; vy = -vy; lastBounce = { x, y: 0 }; }
-    if (y > h - radius) { y = h - radius; vy = -vy; lastBounce = { x, y: h }; }
-    remaining -= dt;
-  }
-  const alpha = 1 - ramp(t, 2.9, 3.4);
+  // in flight: bounces off the glyph's edges, then homes back to the hand
+  const release = discRest(w * 0.38, handY, size);
+  const at = (time) => {
+    const flight = time - throwAt;
+    const free = {
+      x: reflect(release.x + w * 1.6 * flight, radius, w - radius),
+      y: reflect(release.y - h * 0.7 * flight, radius, h - radius),
+    };
+    const home = smooth((time - (catchAt - 0.55)) / 0.55);
+    return { x: mix(free.x, rest.x, home), y: mix(free.y, rest.y, home) };
+  };
   const trail = [];
-  for (let back = 0; back <= 6; back++) trail.push({ x: x - vx * back * 0.012, y: y - vy * back * 0.012 });
-  drawLightLine(context, trail, BLUE, 0.4 * alpha, s * 0.7);
-  drawDisc(context, x, y, radius, alpha, s, t * 9);
-  if (lastBounce) glowDot(context, lastBounce.x, lastBounce.y, 10 * s, CYAN, 0.5 * alpha);
+  for (let back = 0; back <= 8; back++) trail.push(at(Math.max(throwAt, t - back * 0.014)));
+  drawLightLine(context, trail, BLUE, 0.5, s * 0.75);
+  const disc = trail[0];
+  drawDisc(context, disc.x, disc.y, radius, 1, s, t * 10);
+  for (const edge of [disc.x - radius, w - disc.x - radius, disc.y - radius, h - disc.y - radius]) {
+    if (edge < 1.5 * s) glowDot(context, disc.x, disc.y, radius * 2.2, CYAN, 0.5);
+  }
 }
 
 function thumbsUpScene(context, t, w, h, s) {
@@ -505,18 +529,54 @@ function peaceScene(context, t, w, h, s) {
   context.restore();
 }
 
+function shakaScene(context, t, w, h, s) {
+  const size = h * 0.27;
+  const toShaka = ramp(t, 0.05, 0.4) * (1 - ramp(t, 3.25, 3.55));
+  const pose = blendPoses(POSES.open, POSES.shaka, toShaka);
+  const place = (time) => ({ x: w * 0.5, y: h * 0.66, size, roll: 0.2 + 0.6 * Math.sin((time - 0.7) * 3.4) * ramp(time, 0.6, 0.9) });
+  // the baton runs through the hand, along the line from thumb tip to pinky tip
+  const baton = (points, length) => {
+    const dx = points[20].x - points[4].x;
+    const dy = points[20].y - points[4].y;
+    const norm = Math.hypot(dx, dy) || 1;
+    const cx = (points[4].x + points[20].x) / 2;
+    const cy = (points[4].y + points[20].y) / 2;
+    return [
+      { x: cx - (dx / norm) * length, y: cy - (dy / norm) * length },
+      { x: cx + (dx / norm) * length, y: cy + (dy / norm) * length },
+    ];
+  };
+  const lit = ramp(t, 0.4, 0.65) * (1 - ramp(t, 2.95, 3.2));
+  const length = h * 0.5 * lit;
+  if (lit > 0) {
+    // the swing leaves a fading arc of earlier positions
+    for (let back = 4; back >= 1; back--) {
+      const earlier = handPoints(pose, place(t - back * 0.035));
+      drawLightLine(context, baton(earlier, length), BLUE, 0.12 * (5 - back) * lit, s * 0.8);
+    }
+  }
+  const points = hand(context, pose, place(t), { scale: s });
+  if (lit > 0) {
+    drawLightLine(context, baton(points, length), CYAN, lit, s * 1.3);
+    for (const end of baton(points, length)) glowDot(context, end.x, end.y, 6 * s, CYAN, 0.6 * lit);
+  }
+}
+
 export const CONTROLS = [
   { id: 'point', name: 'Point', action: 'Draw a light wall', detail: 'Index finger only', scene: pointScene },
   { id: 'rock', name: 'Rock', action: 'Switch colour', detail: 'Index and pinky · cyan / orange, per hand',
     scene: rockScene },
-  { id: 'ok', name: 'OK sign', action: 'Identity disc', detail: 'Flick to throw · it bounces off walls and discs',
-    scene: okScene },
+  { id: 'ok', name: 'OK sign', action: 'Identity disc', detail: 'The disc rezzes in that hand', scene: okScene },
+  { id: 'flick', name: 'Flick', action: 'Throw the disc', detail: 'Flick the disc hand. It ricochets and comes back',
+    scene: flickScene },
   { id: 'thumbsUp', name: 'Thumbs up', action: 'Launch a light cycle', detail: 'It rides out from your hand',
     scene: thumbsUpScene },
   { id: 'fist', name: 'Fist', action: 'Derezz', detail: 'A wave that breaks everything into voxels',
     scene: fistScene },
   { id: 'peace', name: 'Peace sign', action: 'Digitize yourself', detail: 'A laser sweep turns your outline into light',
     scene: peaceScene },
+  { id: 'shaka', name: 'Shaka', action: 'Light baton',
+    detail: 'Swing it to cut walls and bat discs; pull two apart for a light cycle', scene: shakaScene },
   { id: 'palms', name: 'Both palms open', action: 'Open a portal', detail: 'Palms toward the camera',
     scene: portalScene },
 ];

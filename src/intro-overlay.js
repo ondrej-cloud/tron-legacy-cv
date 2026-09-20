@@ -6,7 +6,7 @@ import { POSES } from './gestures.js';
 import { gestureLabel } from './intro-copy.js';
 import { BLUE, CYAN, WHITE, drawHand, handPoints } from './intro-glyphs.js';
 
-const MAX_PIXEL_RATIO = 1.5;   // full-screen canvas
+const MAX_PIXEL_RATIO = 2;
 const SEAM_GLOW = 34;          // px above and below each seam edge
 
 export function createOverlay({ canvas, ring, reduced }) {

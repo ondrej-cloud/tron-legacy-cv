@@ -124,6 +124,7 @@ export function runIntro({ hands, onDone }) {
   let horizon = window.innerHeight * 0.4;
   let viewportHeight = window.innerHeight;
   let stillDirty = true;   // the gate screen only redraws when something changed
+  let gateShown = false;
   let titleStale = false;  // fonts arrived mid-boot; rebuild the title once it is still
 
   function resize() {
@@ -215,6 +216,7 @@ export function runIntro({ hands, onDone }) {
 
   function showGate(state) {
     phase = 'gate';
+    gateShown = true;
     setGate(state);
     dom.gate.classList.add('is-on');
   }
@@ -335,9 +337,9 @@ export function runIntro({ hands, onDone }) {
     stillDirty = false;
     floor.draw({
       t: 0, timing: BOOT, horizon, backdrop: 1, brightness: 1, scroll: 0, flare: 0,
-      streaks: [], burst: { amount: 0, phase: 0 }, slit: null,
+      streaks: [], burst: { amount: 0, phase: 0 }, slit: null, dormant: 1,
     });
-    title.draw(0, titleTiming);
+    title.draw(0, titleTiming, 1);
   }
 
   function frame() {
@@ -364,8 +366,9 @@ export function runIntro({ hands, onDone }) {
     if (ready && titleStale && !title.animating(boot, titleTiming)) {
       titleStale = false;
       title.build();
-      title.draw(boot, titleTiming);
     }
+    // the unlit title and horizon of the camera screen go dark before the boot lights them
+    const dormant = gateShown ? 1 - smooth(boot / 0.3) : 0;
 
     const palms = openPalms();
     const palmCount = Number(palms.left) + Number(palms.right);
@@ -417,9 +420,10 @@ export function runIntro({ hands, onDone }) {
       streaks,
       burst: { amount: slit ? 1 - smooth((exit - 0.3) / 0.4) : 0, phase: clamp01(exit / 0.6) },
       slit,
+      dormant,
     });
     if (!leaving) {
-      if (title.animating(boot, titleTiming)) title.draw(boot, titleTiming);
+      title.draw(boot, titleTiming, dormant);
       if (manualSince !== null) {
         const shown = seconds - manualSince;
         // each glyph starts as its row fades in, so they don't all begin in one frame

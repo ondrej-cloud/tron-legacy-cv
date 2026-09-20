@@ -190,8 +190,9 @@ export function createTitle(canvas, { reduced = false } = {}) {
   }
 
   // t: seconds into the boot (0 before it starts); sweep: { start, duration };
-  // glintAt: seconds. Letters the sweep hasn't reached yet show as unlit glass.
-  function draw(t, { sweep, glintAt }) {
+  // glintAt: seconds; dormant: 0..1, how much the letters the sweep hasn't
+  // reached yet show as unlit glass (the camera screen).
+  function draw(t, { sweep, glintAt }, dormant = 0) {
     const { width, height } = canvas;
     context.globalCompositeOperation = 'source-over';
     context.globalAlpha = 1;
@@ -201,6 +202,7 @@ export function createTitle(canvas, { reduced = false } = {}) {
 
     const sweepProgress = (t - sweep.start) / sweep.duration;
     const sweepX = (-0.04 + 1.08 * sweepProgress) * width;
+    const breathe = reduced ? 1 : 0.88 + 0.12 * Math.sin(t * 1.4);
     // now and then one letter drops out for a few frames, like a tired tube
     const idleCycle = Math.floor(t / IDLE_PERIOD);
     const idleLetter = Math.floor(hash(idleCycle, 3) * letters.length);
@@ -211,8 +213,10 @@ export function createTitle(canvas, { reduced = false } = {}) {
       const revealAt = sweep.start + sweep.duration * ((letter.centre / width + 0.04) / 1.08);
       const age = t - revealAt;
       if (age < 0) {
-        context.globalAlpha = 0.16;
-        context.drawImage(letter.core, letter.x, letter.y);
+        if (dormant > 0) {
+          context.globalAlpha = 0.16 * dormant;
+          context.drawImage(letter.core, letter.x, letter.y);
+        }
         return;
       }
       let alpha = 1;
@@ -227,7 +231,7 @@ export function createTitle(canvas, { reduced = false } = {}) {
         tear = (1 - settle) ** 2 * fontSize * 0.12;
       }
       if (idleDip && index === idleLetter && frame % 3 !== 0) alpha *= 0.45;
-      context.globalAlpha = alpha * 0.8;
+      context.globalAlpha = alpha * 0.8 * breathe;
       context.drawImage(letter.glow, letter.x, letter.y);
       if (split > 0.5) {
         context.globalAlpha = alpha * 0.8;

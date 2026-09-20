@@ -97,7 +97,8 @@ body.intro-open .sd-ui { visibility: hidden; }
   transition: none !important;
 }
 
-/* title block: unlit on the camera gate, lit by the boot */
+/* title block: unlit on the camera screen; the boot clears it and lights
+   it again (the title on its canvas, the lines below when .is-lit is set) */
 
 .intro-head {
   display: flex;
@@ -112,10 +113,6 @@ body.intro-open .sd-ui { visibility: hidden; }
   aspect-ratio: 7.4 / 1;
 }
 
-.intro.is-ready .intro-title { animation: intro-breathe 5.5s ease-in-out infinite; }
-
-@keyframes intro-breathe { 50% { opacity: 0.86; } }
-
 .intro-subtitle {
   display: flex;
   align-items: center;
@@ -129,10 +126,8 @@ body.intro-open .sd-ui { visibility: hidden; }
   text-shadow: 0 0 10px rgba(0, 200, 255, 0.55);
   white-space: nowrap;
   opacity: 0.32;
-  transition: opacity 0.9s ease;
+  transition: opacity 0.6s ease, transform 0.6s cubic-bezier(0.2, 0.7, 0.2, 1), letter-spacing 1.1s ease;
 }
-
-.intro-head.is-lit .intro-subtitle { opacity: 1; }
 
 .intro-subtitle::before,
 .intro-subtitle::after {
@@ -140,18 +135,9 @@ body.intro-open .sd-ui { visibility: hidden; }
   width: clamp(28px, 7vw, 110px);
   height: 1px;
   background: linear-gradient(90deg, rgba(111, 243, 255, 0), rgba(111, 243, 255, 0.85));
-  transform: scaleX(0.4);
-  transform-origin: right;
-  transition: transform 1.1s cubic-bezier(0.2, 0.7, 0.2, 1);
 }
 
-.intro-subtitle::after {
-  background: linear-gradient(270deg, rgba(111, 243, 255, 0), rgba(111, 243, 255, 0.85));
-  transform-origin: left;
-}
-
-.intro-head.is-lit .intro-subtitle::before,
-.intro-head.is-lit .intro-subtitle::after { transform: none; }
+.intro-subtitle::after { transform: scaleX(-1); }
 
 /* letter-spacing adds space after the last letter too */
 .intro-subtitle span { margin-right: -0.62em; }
@@ -164,20 +150,32 @@ body.intro-open .sd-ui { visibility: hidden; }
   letter-spacing: 0.22em;
   text-transform: uppercase;
   color: rgba(214, 248, 255, 0.42);
+  transition: opacity 0.6s ease, transform 0.6s cubic-bezier(0.2, 0.7, 0.2, 1);
 }
 
-/* system log: a status strip across the top on large screens, a list in
-   the column on smaller ones */
+.intro.is-booting .intro-head:not(.is-lit) .intro-subtitle {
+  opacity: 0;
+  transform: translateY(6px);
+  letter-spacing: 1.1em;
+}
+
+.intro.is-booting .intro-head:not(.is-lit) .intro-fan {
+  opacity: 0;
+  transform: translateY(6px);
+}
+
+.intro-head.is-lit .intro-subtitle { opacity: 1; }
+
+/* system log: a stacked readout in the top right corner on large screens,
+   a list in the column under the title on smaller ones. Labels and values
+   never wrap; the dotted leader between them takes up the slack. */
 
 .intro-log {
   position: absolute;
-  top: 16px;
-  left: 24px;
+  top: 18px;
   right: 24px;
   z-index: 1;
-  display: flex;
-  align-items: baseline;
-  gap: clamp(18px, 2.4vw, 30px);
+  width: 270px;
   font: 400 10.5px/1.75 var(--mono-font);
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -185,9 +183,10 @@ body.intro-open .sd-ui { visibility: hidden; }
 }
 
 .intro-log-head {
-  margin-right: auto;
+  margin-bottom: 2px;
   color: rgba(214, 248, 255, 0.72);
   min-height: 1.75em;
+  white-space: nowrap;
 }
 
 .intro-log-row {
@@ -197,8 +196,11 @@ body.intro-open .sd-ui { visibility: hidden; }
   min-height: 1.75em;
 }
 
+.intro-log-row .label { white-space: nowrap; }
+
 .intro-log-row .leader {
-  flex: 0 0 16px;
+  flex: 1;
+  min-width: 12px;
   border-bottom: 1px dotted rgba(111, 243, 255, 0.3);
   transform: translateY(-3px);
   visibility: hidden;
@@ -219,8 +221,8 @@ body.intro-open .sd-ui { visibility: hidden; }
 
 .intro-stage {
   position: relative;
-  width: min(100%, max(1060px, 92vw), 1480px);
-  margin-top: clamp(18px, 6vh, 64px);
+  width: min(100%, 1060px);
+  margin-top: clamp(14px, 4.5vh, 56px);
   flex-shrink: 0;
 }
 
@@ -233,7 +235,7 @@ body.intro-open .sd-ui { visibility: hidden; }
   right: 0;
   width: min(100%, 560px);
   margin: 0 auto;
-  padding: 8px 0;
+  padding: 22px 0 8px;
   text-align: center;
   opacity: 0;
   visibility: hidden;
@@ -374,6 +376,14 @@ body.intro-open .sd-ui { visibility: hidden; }
     linear-gradient(180deg, rgba(0, 200, 255, 0.07), rgba(0, 200, 255, 0) 42%),
     rgba(1, 7, 10, 0.8);
   clip-path: polygon(var(--cut) 0, 100% 0, 100% calc(100% - var(--cut)), calc(100% - var(--cut)) 100%, 0 100%, 0 var(--cut));
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+}
+
+/* the blur would be recomputed every frame while the page folds away */
+.intro.is-leaving .intro-manual::before {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
 }
 
 .intro-frame {
@@ -391,11 +401,10 @@ body.intro-open .sd-ui { visibility: hidden; }
   stroke-width: 1;
   stroke-dasharray: 1 1;
   stroke-dashoffset: 1;
+  filter: drop-shadow(0 0 3px rgba(0, 200, 255, 0.8));
   transition: stroke-dashoffset 0.9s cubic-bezier(0.5, 0, 0.2, 1);
 }
 
-/* a wider faint stroke under the outline instead of a blur filter */
-.intro-frame .glow { stroke: rgba(0, 200, 255, 0.16); stroke-width: 4; }
 .intro-frame .accent { stroke: rgba(236, 253, 255, 0.95); stroke-width: 1.5; }
 
 .intro-manual.is-on .intro-frame path { stroke-dashoffset: 0; }
@@ -434,8 +443,8 @@ body.intro-open .sd-ui { visibility: hidden; }
 }
 
 .intro-controls {
-  --columns: 4;
-  --gap: clamp(12px, 1.8vw, 26px);
+  --columns: 3;
+  --gap: clamp(12px, 2vw, 28px);
   position: relative;
   list-style: none;
   margin: 0;
@@ -461,13 +470,13 @@ body.intro-open .sd-ui { visibility: hidden; }
 }
 
 /* a hairline above every row but the first */
-.intro-control:nth-child(n + 5) { border-top: 1px solid rgba(111, 243, 255, 0.08); }
+.intro-control:nth-child(n + 4) { border-top: 1px solid rgba(111, 243, 255, 0.08); }
 
 .intro-manual.is-on .intro-control,
 .intro-manual.is-on .intro-manual-head { opacity: 1; transform: none; }
 
 .intro-glyph {
-  width: clamp(84px, 7.4vw, 120px);
+  width: clamp(76px, min(7.6vw, 11vh), 120px);
   aspect-ratio: 4 / 3;
   background:
     linear-gradient(var(--cyan), var(--cyan)) left top / 7px 1px,
@@ -494,6 +503,10 @@ body.intro-open .sd-ui { visibility: hidden; }
   color: var(--white);
   text-shadow: 0 0 12px rgba(0, 200, 255, 0.45);
 }
+
+/* the eighth slot, until its gesture is decided */
+.intro-control.is-placeholder h3,
+.intro-control.is-placeholder .action { color: var(--muted); text-shadow: none; }
 
 .intro-control .detail {
   margin: 3px 0 0;
@@ -560,6 +573,7 @@ body.intro-open .sd-ui { visibility: hidden; }
   text-transform: uppercase;
   cursor: pointer;
   filter: drop-shadow(0 0 6px rgba(0, 200, 255, 0.45));
+  transition: filter 0.2s ease;
   -webkit-tap-highlight-color: transparent;
 }
 
@@ -571,7 +585,7 @@ body.intro-open .sd-ui { visibility: hidden; }
 }
 
 .intro-button::before { inset: 0; background: var(--cyan); }
-.intro-button::after { inset: 1px; background: linear-gradient(180deg, rgba(0, 60, 80, 0.95), rgba(1, 14, 20, 0.97)); }
+.intro-button::after { inset: 1px; background: linear-gradient(180deg, rgba(0, 60, 80, 0.95), rgba(1, 14, 20, 0.97)); transition: background 0.2s ease; }
 
 .intro-button > * { position: relative; z-index: 1; }
 
@@ -617,31 +631,34 @@ body.intro-open .sd-ui { visibility: hidden; }
 
 /* layouts */
 
-@media (max-width: 980px), (max-height: 600px) {
+/* With the readout in the corner, the column starts below it so a wide
+   title never runs under it; short screens tighten up to make the room. */
+@media (min-width: 1100px) and (min-height: 680px) {
+  .intro-page { padding-top: max(clamp(18px, 7vh, 76px), 122px); }
+}
+
+@media (min-width: 1100px) and (min-height: 680px) and (max-height: 820px) {
+  .intro-title { width: min(100%, 1060px, 102vh); }
+  .intro-stage { margin-top: clamp(10px, 2.6vh, 56px); }
+  .intro-enter { margin-top: clamp(10px, 2.2vh, 40px); }
+  .intro-control { padding-top: 6px; padding-bottom: 6px; }
+}
+
+@media (max-width: 1099px), (max-height: 679px) {
   .intro-log {
     position: relative;
     top: auto;
-    left: auto;
     right: auto;
     order: 1;
-    display: block;
     width: min(100%, 340px);
     margin-top: clamp(10px, 2.5vh, 22px);
     flex-shrink: 0;
   }
-  .intro-log-head { margin-bottom: 2px; }
-  .intro-log-row .leader { flex: 1; }
   /* in the column the empty log would push the camera question down */
   .intro:not(.is-booting) .intro-log { display: none; }
   .intro-head { order: 0; }
   .intro-stage { order: 2; }
   .intro-enter { order: 3; }
-}
-
-@media (max-width: 1100px) {
-  .intro-controls { --columns: 3; }
-  .intro-control:nth-child(n) { border-top: 0; }
-  .intro-control:nth-child(n + 4) { border-top: 1px solid rgba(111, 243, 255, 0.08); }
 }
 
 @media (max-width: 860px) {
@@ -696,6 +713,8 @@ body.intro-open .sd-ui { visibility: hidden; }
   .intro-frame path { transition-duration: 0.25s; }
   .intro-log-row .value[data-state='pending'],
   .intro-gate[data-state='waiting'] .intro-gate-text,
-  .intro-gate-progress::after,
-  .intro.is-ready .intro-title { animation: none; }
+  .intro-gate-progress::after { animation: none; }
+  .intro-subtitle,
+  .intro-fan { transition-duration: 0.25s; }
+  .intro.is-booting .intro-head:not(.is-lit) .intro-subtitle { letter-spacing: 0.62em; }
 }

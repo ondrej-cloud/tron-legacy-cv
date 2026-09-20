@@ -85,14 +85,14 @@ export function buildDom() {
           </div>
         </section>
         <section class="intro-manual" data-at="manual" aria-labelledby="intro-manual-heading">
-          <svg class="intro-frame" aria-hidden="true"><path class="glow" pathLength="1"></path><path class="edge" pathLength="1"></path><path class="accent" pathLength="1"></path></svg>
+          <svg class="intro-frame" aria-hidden="true"><path class="edge" pathLength="1"></path><path class="accent" pathLength="1"></path></svg>
           <div class="intro-manual-head">
             <h2 id="intro-manual-heading">Controls</h2>
             <p>Use either hand. Each hand has its own colour.</p>
           </div>
           <ul class="intro-controls">
             ${CONTROLS.map((control, index) => `
-              <li class="intro-control" style="--i: ${index}">
+              <li class="intro-control${control.placeholder ? ' is-placeholder' : ''}" style="--i: ${index}">
                 <canvas class="intro-glyph" aria-hidden="true"></canvas>
                 <div>
                   <h3>${control.name}</h3>
@@ -153,11 +153,9 @@ export function buildDom() {
 // along them. `cut` is the chamfer in CSS pixels.
 export function shapeFrame(frame, width, height, cut) {
   frame.setAttribute('viewBox', `0 0 ${width} ${height}`);
-  const [glow, edge, accent] = frame.querySelectorAll('path');
-  const outline = `M${cut + 0.5} 0.5 H${width - 0.5} V${height - cut - 0.5} `
-    + `L${width - cut - 0.5} ${height - 0.5} H0.5 V${cut + 0.5} Z`;
-  glow.setAttribute('d', outline);
-  edge.setAttribute('d', outline);
+  const [edge, accent] = frame.querySelectorAll('path');
+  edge.setAttribute('d', `M${cut + 0.5} 0.5 H${width - 0.5} V${height - cut - 0.5} `
+    + `L${width - cut - 0.5} ${height - 0.5} H0.5 V${cut + 0.5} Z`);
   accent.setAttribute('d', `M0.5 ${cut + 26} V${cut + 0.5} L${cut + 0.5} 0.5 H${cut + 64} `
     + `M${width - 0.5} ${height - cut - 26} V${height - cut - 0.5} L${width - cut - 0.5} ${height - 0.5} `
     + `H${width - cut - 64}`);

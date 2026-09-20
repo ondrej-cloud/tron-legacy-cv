@@ -10,7 +10,7 @@ const FLOOR = {
   minCell: 54,            // px
   farDepth: 70,           // depth (camera heights) where the floor ends
   trail: 2.6,             // depth units behind a light cycle head
-  maxPixelRatio: 1.5,     // a full-screen canvas; thin lines still look crisp at 1.5
+  maxPixelRatio: 2,
 };
 
 const clamp01 = (value) => Math.min(1, Math.max(0, value));
@@ -150,13 +150,15 @@ export function createFloor(canvas) {
   function drawHorizon(g, state) {
     const { t, timing } = state;
     const { cx, horizon } = g;
-    // before the boot: a faint, unlit line
-    const dormant = context.createLinearGradient(0, 0, width, 0);
-    dormant.addColorStop(0, `rgba(${CYAN}, 0)`);
-    dormant.addColorStop(0.5, `rgba(${CYAN}, 0.3)`);
-    dormant.addColorStop(1, `rgba(${CYAN}, 0)`);
-    context.fillStyle = dormant;
-    context.fillRect(0, horizon - 0.5, width, 1);
+    // on the camera screen: a faint, unlit line that goes dark as the boot starts
+    if (state.dormant > 0) {
+      const unlit = context.createLinearGradient(0, 0, width, 0);
+      unlit.addColorStop(0, `rgba(${CYAN}, 0)`);
+      unlit.addColorStop(0.5, `rgba(${CYAN}, ${0.3 * state.dormant})`);
+      unlit.addColorStop(1, `rgba(${CYAN}, 0)`);
+      context.fillStyle = unlit;
+      context.fillRect(0, horizon - 0.5, width, 1);
+    }
     if (t < timing.horizon - 0.2) return;
 
     // a point of light flickers on, then stretches into the horizon
@@ -259,7 +261,7 @@ export function createFloor(canvas) {
   }
 
   // state: { t, timing, horizon, backdrop, brightness, scroll, flare, streaks,
-  //          burst: { amount, phase }, slit: { top, bottom } | null }
+  //          burst: { amount, phase }, slit: { top, bottom } | null, dormant }
   function draw(state) {
     if (!layers || Math.abs(layers.horizon - state.horizon) > 0.5) layers = buildLayers(state.horizon);
     context.setTransform(1, 0, 0, 1, 0, 0);
@@ -276,8 +278,11 @@ export function createFloor(canvas) {
     context.fillStyle = `rgba(0, 0, 0, ${state.backdrop})`;
     context.fillRect(0, 0, canvas.width, canvas.height);
     context.globalCompositeOperation = 'lighter';
-    context.globalAlpha = Math.min(1, smooth((state.t - state.timing.horizon) / 1.2) * state.brightness);
-    if (context.globalAlpha > 0) context.drawImage(layers.glow, 0, 0);
+    // the glow brightens past full strength while leaving: draw it again on top
+    for (let glow = smooth((state.t - state.timing.horizon) / 1.2) * state.brightness; glow > 0.004; glow -= 1) {
+      context.globalAlpha = Math.min(1, glow);
+      context.drawImage(layers.glow, 0, 0);
+    }
     context.globalAlpha = 1;
 
     context.setTransform(ratio, 0, 0, ratio, 0, 0);
