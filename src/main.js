@@ -102,6 +102,7 @@ function frame(nowMs) {
   tuning.update();
   window.__stats.frames++;
   window.__stats.effect = active?.id ?? null;
+  window.__stats.tracker = hands.trackerMode;
   window.__stats.hands = hands.list
     .map((hand) => `${hand.id}:${hand.gesture}:${hand.pinch.toFixed(2)}${hand.closed ? '*' : ''}`).join(' ');
   if (active?.effect.stats) Object.assign(window.__stats, active.effect.stats());

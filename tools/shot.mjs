@@ -2,11 +2,13 @@
 //
 //   node tools/shot.mjs <page path> [--times 1500,4000,8000] [--size 1280x720]
 //                       [--query demo=1] [--out shots/<name>] [--fake-video file|none]
+//                       [--keys Enter@1500,Space@4000]
 //
 // Serves the project root on a random local port, opens the page (demo mode by
 // default, so hands are scripted), saves a PNG at each time, then prints
 // console errors/warnings, uncaught exceptions, the measured FPS, and
-// window.__stats if the page exposes it.
+// window.__stats if the page exposes it, and every main-thread stall longer
+// than 50 ms (long tasks), which is what reads as a hitch on screen.
 //
 // The webcam is faked: .local/camera.mjpeg (a synthetic room, if present) or
 // the file given with --fake-video; `--fake-video none` uses Chrome's built-in
@@ -28,7 +30,7 @@ const MIME = {
 
 function parseArgs(argv) {
   const options = { page: null, times: [1500, 4000, 8000], size: [1280, 720], query: 'demo=1', out: null,
-    fakeVideo: '.local/camera.mjpeg' };
+    fakeVideo: '.local/camera.mjpeg', keys: [] };
   for (let index = 0; index < argv.length; index++) {
     const arg = argv[index];
     if (arg === '--times') options.times = argv[++index].split(',').map(Number);
@@ -36,6 +38,12 @@ function parseArgs(argv) {
     else if (arg === '--query') options.query = argv[++index];
     else if (arg === '--out') options.out = argv[++index];
     else if (arg === '--fake-video') options.fakeVideo = argv[++index];
+    else if (arg === '--keys') {
+      options.keys = argv[++index].split(',').map((entry) => {
+        const [key, time] = entry.split('@');
+        return { key, time: Number(time) };
+      });
+    }
     else options.page = arg;
   }
   if (!options.page) {
@@ -89,14 +97,34 @@ page.on('console', (message) => {
 });
 page.on('pageerror', (error) => messages.push(`[exception] ${error.stack || error.message}`));
 page.on('requestfailed', (request) => messages.push(`[request failed] ${request.url()} ${request.failure()?.errorText}`));
+await page.addInitScript(() => {
+  window.__longTasks = [];
+  try {
+    new PerformanceObserver((list) => {
+      for (const entry of list.getEntries()) {
+        window.__longTasks.push({ start: Math.round(entry.startTime), duration: Math.round(entry.duration) });
+      }
+    }).observe({ type: 'longtask', buffered: true });
+  } catch {
+    // long task timing not supported
+  }
+});
 
 const startedAt = Date.now();
 await page.goto(url, { waitUntil: 'load' });
 const saved = [];
-for (const time of [...options.times].sort((a, b) => a - b)) {
-  const wait = time - (Date.now() - startedAt);
+const events = [
+  ...options.times.map((time) => ({ time, shot: true })),
+  ...options.keys.map(({ key, time }) => ({ time, key })),
+].sort((a, b) => a.time - b.time);
+for (const event of events) {
+  const wait = event.time - (Date.now() - startedAt);
   if (wait > 0) await page.waitForTimeout(wait);
-  const file = join(options.out, `t${String(time).padStart(5, '0')}.png`);
+  if (event.key) {
+    await page.keyboard.press(event.key);
+    continue;
+  }
+  const file = join(options.out, `t${String(event.time).padStart(5, '0')}.png`);
   await page.screenshot({ path: file });
   saved.push(file);
 }
@@ -112,6 +140,7 @@ const fps = await page.evaluate(() => new Promise((done) => {
   requestAnimationFrame(tick);
 }));
 const stats = await page.evaluate(() => window.__stats ?? null);
+const longTasks = await page.evaluate(() => window.__longTasks ?? []);
 const renderer = await page.evaluate(() => {
   const gl = document.createElement('canvas').getContext('webgl2');
   const info = gl && gl.getExtension('WEBGL_debug_renderer_info');
@@ -126,5 +155,8 @@ console.log(`camera:    ${cameraOff ? 'off' : fakeVideo ?? 'chrome test pattern'
 console.log(`renderer:  ${renderer}`);
 console.log(`fps:       ${fps.toFixed(1)} (headless; real browser is usually higher)`);
 if (stats) console.log(`stats:     ${JSON.stringify(stats)}`);
+const worst = [...longTasks].sort((a, b) => b.duration - a.duration).slice(0, 6)
+  .map((task) => `${task.duration} ms @ ${task.start}`).join(', ');
+console.log(`stalls:    ${longTasks.length} over 50 ms${worst ? ` (worst: ${worst})` : ''}`);
 console.log(`shots:     ${saved.join(', ')}`);
 console.log(messages.length ? `problems (${messages.length}):\n  ${messages.join('\n  ')}` : 'problems:  none');

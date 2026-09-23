@@ -127,15 +127,20 @@ export class Hands {
     this.video.playsInline = true;
     this.video.muted = true;
     this.hasCamera = false;
-    this.landmarker = null;
+    this.landmarker = null;      // main-thread fallback
+    this.trackerWorker = null;   // preferred: tracking runs in src/tracker-worker.js
+    this.trackerMode = null;     // 'worker' | 'main thread', once loaded
+    this.workerBusy = false;
+    this.workerResult = null;
     this.trackerLoading = null;
     this.lastVideoTime = -1;
     this.lastUpdateMs = performance.now();
     this.demoStartMs = performance.now();
     this.demoScript = pinchDemo;
-    // > 0: MediaPipe's handedness labels need swapping (assumed at start),
-    // < 0: they don't. Learned from frames with two hands side by side.
-    this.labelSwapScore = 1;
+    // > 0: MediaPipe's handedness labels need swapping, < 0: they don't
+    // (they matched the real hand when tested on unmirrored webcam frames).
+    // Re-learned from every frame with two hands side by side.
+    this.labelSwapScore = -1;
     this.mouse = { x: 0.7, y: 0.5, down: false, seen: false };
     this._bindMouse();
   }
@@ -180,7 +185,7 @@ export class Hands {
 
   _refreshStatus() {
     if (this.mode !== 'camera') this.status = this.mode;
-    else if (this.landmarker) this.status = 'ready';
+    else if (this.landmarker || this.trackerWorker) this.status = 'ready';
   }
 
   async _openCamera() {
@@ -201,10 +206,20 @@ export class Hands {
   }
 
   // MediaPipe is only downloaded the first time tracking is actually needed.
+  // It runs in a worker when the browser allows it, so model loading and
+  // detection never block the page; otherwise on the main thread.
   _loadTracker() {
-    if (!this.hasCamera || this.landmarker) return Promise.resolve();
+    if (!this.hasCamera || this.landmarker || this.trackerWorker) return Promise.resolve();
     this.trackerLoading ??= (async () => {
       this.status = 'loading hand tracker';
+      try {
+        await this._startWorker();
+        this.trackerMode = 'worker';
+        this._refreshStatus();
+        return;
+      } catch (workerError) {
+        console.warn('hand tracking worker unavailable, tracking on the main thread', workerError);
+      }
       try {
         const { HandLandmarker, FilesetResolver } = await import(VISION_URL);
         const fileset = await FilesetResolver.forVisionTasks(WASM_URL);
@@ -223,6 +238,7 @@ export class Hands {
           options.baseOptions.delegate = 'CPU';
           this.landmarker = await HandLandmarker.createFromOptions(fileset, options);
         }
+        this.trackerMode = 'main thread';
         this._refreshStatus();
       } catch (trackerError) {
         console.error('hand tracker failed, falling back to mouse', trackerError);
@@ -231,6 +247,52 @@ export class Hands {
       }
     })();
     return this.trackerLoading;
+  }
+
+  _startWorker() {
+    return new Promise((resolve, reject) => {
+      const worker = new Worker(new URL('./tracker-worker.js', import.meta.url), { type: 'module' });
+      const fail = (error) => {
+        worker.terminate();
+        reject(error);
+      };
+      const timeout = setTimeout(() => fail(new Error('worker did not start in time')), 30000);
+      worker.onerror = (event) => {
+        clearTimeout(timeout);
+        fail(new Error(event.message || 'worker error'));
+      };
+      worker.onmessage = ({ data }) => {
+        if (data.type === 'error') {
+          clearTimeout(timeout);
+          fail(new Error(data.message));
+        } else if (data.type === 'ready') {
+          clearTimeout(timeout);
+          worker.onmessage = ({ data: message }) => this._onWorkerMessage(message);
+          worker.onerror = (event) => console.error('hand tracking worker failed', event.message);
+          this.trackerWorker = worker;
+          resolve();
+        }
+      };
+      worker.postMessage({ type: 'init', visionUrl: VISION_URL, wasmUrl: WASM_URL, modelUrl: MODEL_URL });
+    });
+  }
+
+  _onWorkerMessage(message) {
+    if (message.type === 'result') this.workerResult = message;
+    else if (message.type === 'frameError') console.warn('hand tracking frame failed', message.message);
+    this.workerBusy = false;
+  }
+
+  // One frame in flight at a time: a new frame goes out only once the
+  // previous result is back, which keeps the latency at about one frame.
+  _sendFrameToWorker(nowMs) {
+    const video = this.video;
+    if (this.workerBusy || video.readyState < 2 || video.currentTime === this.lastVideoTime) return;
+    this.lastVideoTime = video.currentTime;
+    this.workerBusy = true;
+    createImageBitmap(video)
+      .then((frame) => this.trackerWorker.postMessage({ type: 'frame', frame, timestamp: nowMs }, [frame]))
+      .catch(() => { this.workerBusy = false; });
   }
 
   _bindMouse() {
@@ -271,17 +333,27 @@ export class Hands {
     };
   }
 
-  // null = no new camera frame this tick (keep last assignment)
+  // null = no new tracking result this tick (keep last assignment)
   _observeCamera(nowMs) {
+    if (this.trackerWorker) {
+      this._sendFrameToWorker(nowMs);
+      const result = this.workerResult;
+      this.workerResult = null;
+      return result ? this._toObservations(result.landmarks, result.handedness) : null;
+    }
     const video = this.video;
     if (!this.landmarker || video.readyState < 2 || video.currentTime === this.lastVideoTime) {
       return null;
     }
     this.lastVideoTime = video.currentTime;
     const result = this.landmarker.detectForVideo(video, nowMs);
+    return this._toObservations(result.landmarks ?? [], result.handedness ?? result.handednesses ?? []);
+  }
+
+  _toObservations(landmarkSets, handedness) {
+    const video = this.video;
     const aspect = video.videoWidth / video.videoHeight;
-    const handedness = result.handedness ?? result.handednesses ?? [];
-    return (result.landmarks || []).map((raw, handIndex) => {
+    return landmarkSets.map((raw, handIndex) => {
       // hand space: mirrored, all axes in units of the frame height
       const points = raw.map((point) => ({ x: (1 - point.x) * aspect, y: point.y, z: point.z * aspect }));
       // raw label; whether it needs swapping for our unmirrored input is learned in _assign
