@@ -1,0 +1,7 @@
+.local/
+shots/
+node_modules/
+tools/
+.DS_Store
+.env*
+.vercel/

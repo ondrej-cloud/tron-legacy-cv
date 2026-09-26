@@ -7,8 +7,8 @@
 I love TRON: Legacy. The Grid, the light cycles, the identity discs, the Daft Punk soundtrack: I've rewatched
 it more times than I'd like to admit, and I always wanted to throw an identity disc myself. So I built the
 next best thing. **Tron Legacy CV** turns your webcam into the Grid: you draw light walls with your finger,
-summon a disc, throw it so it ricochets off the walls you drew, launch light cycles, derezz everything with a
-fist and get digitized by the laser, all with hand gestures, live in the browser.
+summon a disc, throw it so it ricochets off the walls you drew, swing a light baton, launch light cycles,
+derezz everything with a fist and get digitized by the laser, all with hand gestures, live in the browser.
 
 It's a computer vision project at heart: MediaPipe tracks 21 landmarks on each hand, and everything you see is
 driven by a gesture recognizer I built on top of those landmarks. It runs entirely in your browser. Nothing
@@ -16,7 +16,7 @@ is uploaded anywhere.
 
 **▶ Live demo:** https://tron-legacy-cv.vercel.app (allow the camera, or watch the scripted demo without one)
 
-- **Eight gestures, two hands**: point, rock, OK, flick, thumbs up, fist, peace and both open palms
+- **Nine gestures, two hands**: point, rock, OK, flick, thumbs up, fist, peace, shaka and both open palms
   together. Each hand plays independently and has its own team colour, TRON cyan or CLU orange.
 - **Finger-level gesture recognition**: per-finger joint angles, thumb-to-fingertip contacts with
   hysteresis, palm orientation and handedness, all measured relative to palm size, so it works at any
@@ -40,6 +40,7 @@ is uploaded anywhere.
 | 👍 **Thumbs up** | Launches a light cycle that drops onto the Grid and races across it |
 | ✊ **Fist** | Derezz: walls, discs and cycles shatter into voxels |
 | ✌️ **Peace** | The digitizing laser sweeps over you and turns your outline into light |
+| 🤙 **Shaka** (thumb + pinky) | A light baton in your hand: swing it to cut walls and bat discs away. Pull two batons apart and they rezz a light cycle |
 | 🖐️🖐️ **Both palms open**, facing the camera | Opens a portal of light between your hands and lights up the Grid |
 
 <table>
@@ -54,6 +55,10 @@ is uploaded anywhere.
   <tr>
     <td><img src="media/derezz.jpg" alt="A fist sending out a derezz wave that shatters a wall into voxels"><br><b>Fist:</b> derezz</td>
     <td><img src="media/light-cycles.jpg" alt="A cyan and an orange light cycle racing across the Grid"><br><b>Thumbs up:</b> light cycles on the Grid</td>
+  </tr>
+  <tr>
+    <td><img src="media/baton.jpg" alt="An orange light baton swung through a light wall, leaving a glowing arc"><br><b>Shaka:</b> a light baton cutting through a wall</td>
+    <td><img src="media/baton-cycle.jpg" alt="A light cycle rezzing between two hands that held batons"><br>Two batons pulled apart rezz a light cycle</td>
   </tr>
   <tr>
     <td><img src="media/digitize.jpg" alt="The digitizing laser turning a person's silhouette into an orange grid of light"><br><b>Peace:</b> the digitizing laser (here on a synthetic test video)</td>
@@ -75,8 +80,11 @@ flowchart LR
     G --> H[Screen-blended<br/>over the camera]
 ```
 
-1. **Tracking** (`src/hands.js`): MediaPipe's Hand Landmarker runs on every new webcam frame (GPU delegate,
-   CPU fallback) and returns 21 landmarks per hand.
+1. **Tracking** (`src/hands.js`, `src/tracker-worker.js`): MediaPipe's Hand Landmarker runs in a Web Worker
+   (GPU delegate, CPU fallback). Each new webcam frame goes over as an `ImageBitmap`, one frame in flight at a
+   time, and 21 landmarks per hand come back. Loading the model and warming up its shaders stalls for over half
+   a second, and in the worker that never freezes the animation. Browsers without module-worker support fall
+   back to the main thread.
 2. **Hand space**: the landmarks are mirrored to match the selfie view, mapped through the `object-fit: cover`
    crop of the full-screen video, and scaled so x, y and z share one unit. Every measurement is then divided
    by the palm length (wrist to middle knuckle), so a gesture reads the same close to the camera and far from it.
@@ -138,7 +146,7 @@ npm run shot -- ./ --query "demo=1&skipintro"   # headless screenshots with a fa
 ```
 
 `npm test` runs every pose of the procedural hand through the recognizer for both hands, palm in and out and
-tilted (655 checks). The screenshot tool drives headless Chrome on the real GPU with a fake webcam; all the
+tilted (727 checks). The screenshot tool drives headless Chrome on the real GPU with a fake webcam; all the
 pictures in this README come from it.
 
 ## Project structure
@@ -148,12 +156,13 @@ index.html              page, import map, layers (camera, effect, UI)
 src/
   main.js               host: camera background, effect loop, intro
   hands.js              tracking, hand space, handedness, events, demo/mouse input
+  tracker-worker.js     MediaPipe hand landmarker in a Web Worker
   gestures.js           finger analysis, gesture classifier, thresholds, procedural hand
   segmentation.js       selfie segmentation for the digitizing laser
   tuning.js             live tuning panel (G)
   ui.js                 status and keyboard shortcuts
   intro*.js, intro.css  camera gate, boot sequence, controls, entering the Grid
-  effects/tron/         walls, discs, cycles, voxels, portal, Grid, HUD, digitize, demo
+  effects/tron/         walls, discs, baton, cycles, voxels, portal, Grid, HUD, digitize, demo
 tools/
   test-gestures.mjs     recognition tests
   shot.mjs              headless screenshots
