@@ -56,6 +56,7 @@ const STYLE = `
   border: 1px solid rgba(111,243,255,.35); border-radius: 3px; padding: 4px 10px; }
 .tn-buttons button:hover { background: rgba(111,243,255,.2); }
 .tn-buttons span { color: rgba(217,248,255,.55); }
+.tn-tracker { margin-top: 8px; color: rgba(217,248,255,.6); }
 @media (max-width: 760px) {
   .tn-hand { width: calc(50vw - 21px); }
   .tn-sliders { grid-template-columns: 1fr; }
@@ -185,9 +186,11 @@ export function createTuningPanel(hands) {
   controls.className = 'tn-panel tn-controls';
   controls.innerHTML = '<h3>THRESHOLDS</h3><div class="tn-sliders"></div>'
     + '<div class="tn-buttons"><button data-action="copy">Copy as code</button>'
-    + '<button data-action="reset">Reset</button><span data-role="note">G closes this panel</span></div>';
+    + '<button data-action="reset">Reset</button><span data-role="note">G closes this panel</span></div>'
+    + '<div class="tn-line tn-tracker" data-role="tracker"></div>';
   root.appendChild(controls);
   const note = controls.querySelector('[data-role="note"]');
+  const trackerLine = controls.querySelector('[data-role="tracker"]');
 
   const inputs = new Map();
   for (const slider of SLIDERS) {
@@ -246,6 +249,11 @@ export function createTuningPanel(hands) {
       if (root.hidden) return;
       updateHandPanel(views.left, hands.left, hands);
       updateHandPanel(views.right, hands.right, hands);
+      const stats = hands.trackerStats;
+      trackerLine.textContent = hands.trackerMode
+        ? `tracker: ${hands.trackerMode} · ${stats.fps.toFixed(0)} results/s · longest gap ${stats.maxGapMs} ms`
+          + ` · hands lost ${stats.lost}`
+        : `tracker: ${hands.status}`;
     },
   };
 }

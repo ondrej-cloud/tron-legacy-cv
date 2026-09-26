@@ -19,11 +19,11 @@ self.importScripts = (...urls) => {
 
 let landmarker = null;
 
-async function init({ visionUrl, wasmUrl, modelUrl }) {
+async function init({ visionUrl, wasmUrl, modelUrl, delegate = 'GPU' }) {
   const { HandLandmarker, FilesetResolver } = await import(visionUrl);
   const fileset = await FilesetResolver.forVisionTasks(wasmUrl);
   const options = {
-    baseOptions: { modelAssetPath: modelUrl, delegate: 'GPU' },
+    baseOptions: { modelAssetPath: modelUrl, delegate },
     numHands: 2,
     runningMode: 'VIDEO',
     minHandDetectionConfidence: 0.5,
@@ -32,8 +32,9 @@ async function init({ visionUrl, wasmUrl, modelUrl }) {
   };
   try {
     landmarker = await HandLandmarker.createFromOptions(fileset, options);
-  } catch (gpuError) {
-    console.warn('GPU delegate failed in the worker, retrying on CPU', gpuError);
+  } catch (delegateError) {
+    if (delegate === 'CPU') throw delegateError;
+    console.warn('GPU delegate failed in the worker, retrying on CPU', delegateError);
     options.baseOptions.delegate = 'CPU';
     landmarker = await HandLandmarker.createFromOptions(fileset, options);
   }

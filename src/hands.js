@@ -1,4 +1,4 @@
-// Hand input for Stardust.
+// Hand input: webcam tracking, mouse and scripted demo hands.
 //
 // The webcam always runs (it is the full-screen background). Hands come from
 // one of three sources:
@@ -21,8 +21,11 @@ const MODEL_URL = 'https://storage.googleapis.com/mediapipe-models/hand_landmark
 // hysteresis so `closed` doesn't flicker around a single threshold
 const CLOSE_BELOW = 0.18;
 const OPEN_ABOVE = 0.32;
-// keep a hand alive briefly through tracking dropouts
-const LOST_AFTER_MS = 250;
+// keep a hand alive through tracking dropouts: at least this long, and at
+// least a few tracker intervals when the tracker runs slower than usual
+const LOST_AFTER_MS = 300;
+const LOST_AFTER_INTERVALS = 4;
+const LOST_AFTER_MAX_MS = 700;
 // smoothing time constants (seconds)
 const POSITION_SMOOTHING = 0.045;
 const PINCH_SMOOTHING = 0.05;
@@ -127,11 +130,19 @@ export class Hands {
     this.video.playsInline = true;
     this.video.muted = true;
     this.hasCamera = false;
-    this.landmarker = null;      // main-thread fallback
-    this.trackerWorker = null;   // preferred: tracking runs in src/tracker-worker.js
+    this.landmarker = null;      // default: tracking on the main thread
+    this.trackerWorker = null;   // opt-in (?tracker=worker): src/tracker-worker.js
     this.trackerMode = null;     // 'worker' | 'main thread', once loaded
     this.workerBusy = false;
     this.workerResult = null;
+    // The worker keeps model loading off the main thread, but in Chrome its
+    // ImageBitmap frames made the tracker keep losing hands that were in plain
+    // view, so it's opt-in. The intro hides the main-thread start-up instead.
+    this.useWorker = params.get('tracker') === 'worker';
+    this.workerDelegate = params.get('delegate') === 'cpu' ? 'CPU' : 'GPU';
+    // how the tracker is keeping up: results per second, longest gap, lost hands
+    this.trackerStats = { fps: 0, maxGapMs: 0, lost: 0 };
+    this.resultTimes = [];
     this.trackerLoading = null;
     this.lastVideoTime = -1;
     this.lastUpdateMs = performance.now();
@@ -206,19 +217,21 @@ export class Hands {
   }
 
   // MediaPipe is only downloaded the first time tracking is actually needed.
-  // It runs in a worker when the browser allows it, so model loading and
-  // detection never block the page; otherwise on the main thread.
+  // It runs on the main thread, or in a worker with ?tracker=worker (falling
+  // back to the main thread if the worker can't start).
   _loadTracker() {
     if (!this.hasCamera || this.landmarker || this.trackerWorker) return Promise.resolve();
     this.trackerLoading ??= (async () => {
       this.status = 'loading hand tracker';
-      try {
-        await this._startWorker();
-        this.trackerMode = 'worker';
-        this._refreshStatus();
-        return;
-      } catch (workerError) {
-        console.warn('hand tracking worker unavailable, tracking on the main thread', workerError);
+      if (this.useWorker) {
+        try {
+          await this._startWorker();
+          this.trackerMode = 'worker';
+          this._refreshStatus();
+          return;
+        } catch (workerError) {
+          console.warn('hand tracking worker unavailable, tracking on the main thread', workerError);
+        }
       }
       try {
         const { HandLandmarker, FilesetResolver } = await import(VISION_URL);
@@ -273,12 +286,16 @@ export class Hands {
           resolve();
         }
       };
-      worker.postMessage({ type: 'init', visionUrl: VISION_URL, wasmUrl: WASM_URL, modelUrl: MODEL_URL });
+      worker.postMessage({ type: 'init', visionUrl: VISION_URL, wasmUrl: WASM_URL, modelUrl: MODEL_URL,
+        delegate: this.workerDelegate });
     });
   }
 
   _onWorkerMessage(message) {
-    if (message.type === 'result') this.workerResult = message;
+    if (message.type === 'result') {
+      this.workerResult = message;
+      this._countResult(performance.now());
+    }
     else if (message.type === 'frameError') console.warn('hand tracking frame failed', message.message);
     this.workerBusy = false;
   }
@@ -290,6 +307,8 @@ export class Hands {
     if (this.workerBusy || video.readyState < 2 || video.currentTime === this.lastVideoTime) return;
     this.lastVideoTime = video.currentTime;
     this.workerBusy = true;
+    // (VideoFrame would avoid a copy, but MediaPipe converts it on the CPU and
+    // ends up several times slower than an ImageBitmap)
     createImageBitmap(video)
       .then((frame) => this.trackerWorker.postMessage({ type: 'frame', frame, timestamp: nowMs }, [frame]))
       .catch(() => { this.workerBusy = false; });
@@ -347,7 +366,28 @@ export class Hands {
     }
     this.lastVideoTime = video.currentTime;
     const result = this.landmarker.detectForVideo(video, nowMs);
+    this._countResult(performance.now());
     return this._toObservations(result.landmarks ?? [], result.handedness ?? result.handednesses ?? []);
+  }
+
+  // A hand that misses a few tracker results isn't gone yet; this window
+  // stretches with the tracker's actual pace so a slow frame doesn't make the
+  // hand blink out and its gesture fire again when it comes back.
+  _lostAfterMs() {
+    if (this.mode !== 'camera' || !this.trackerStats.fps) return LOST_AFTER_MS;
+    const interval = 1000 / this.trackerStats.fps;
+    return Math.min(LOST_AFTER_MAX_MS, Math.max(LOST_AFTER_MS, interval * LOST_AFTER_INTERVALS,
+      this.trackerStats.maxGapMs * 1.5));
+  }
+
+  _countResult(timeMs) {
+    const times = this.resultTimes;
+    times.push(timeMs);
+    while (times.length && timeMs - times[0] > 2000) times.shift();
+    let maxGap = 0;
+    for (let index = 1; index < times.length; index++) maxGap = Math.max(maxGap, times[index] - times[index - 1]);
+    this.trackerStats.fps = times.length / 2;
+    this.trackerStats.maxGapMs = Math.round(maxGap);
   }
 
   _toObservations(landmarkSets, handedness) {
@@ -436,7 +476,7 @@ export class Hands {
     } else if (sorted.length === 1) {
       const observation = sorted[0];
       const recent = [this.left, this.right]
-        .filter((hand) => hand.visible && nowMs - hand.lastSeenMs < LOST_AFTER_MS)
+        .filter((hand) => hand.visible && nowMs - hand.lastSeenMs < this._lostAfterMs())
         .sort((a, b) => distanceTo(a, observation) - distanceTo(b, observation));
       const slot = recent.length ? recent[0] : (midX(observation) < 0.5 ? this.left : this.right);
       targets.set(slot, observation);
@@ -457,10 +497,11 @@ export class Hands {
     hand.justOpened = false;
     hand.gestureChanged = false;
     hand.taps = [];
-    const alive = nowMs - hand.lastSeenMs < LOST_AFTER_MS && hand.target;
+    const alive = nowMs - hand.lastSeenMs < this._lostAfterMs() && hand.target;
     if (!alive) {
       if (hand.visible) {
         hand.visible = false;
+        this.trackerStats.lost++;
         if (hand.closed) {           // losing a closed hand counts as releasing it
           hand.closed = false;
           hand.justOpened = true;
