@@ -1,11 +1,12 @@
-// Tron: the Grid over your webcam. Hand gestures draw light-cycle walls,
+// Tron: the Grid over your webcam. Hand gestures draw glass light walls,
 // switch each hand between TRON and CLU colours, summon and throw identity
 // discs that ricochet off the walls and each other, launch light cycles onto
-// the Grid floor, swing light batons that cut walls and bat discs (two of
-// them rez a light cycle), derezz everything into voxels, open a portal
-// between the hands, and digitize the person on camera with a laser (person
-// segmentation); a holographic HUD shows what the hand tracker sees (the
-// rules are in controls.js).
+// the Grid floor, swing a light baton that cuts walls and bats discs (pulled
+// apart, it rezzes a light cycle), derezz what is around a fist, open a
+// portal between the hands, digitize the person on camera with a laser
+// (person segmentation), and shut the whole Grid down with END OF LINE; a
+// holographic HUD shows what the hand tracker sees (the rules are in
+// controls.js).
 //
 // The scene is flat, in "view units": the frame is 1 unit tall, x runs from
 // -aspect/2 to +aspect/2, y points up, (0, 0) is the centre of the screen.
@@ -26,6 +27,8 @@ import { createDiscs } from './disc.js';
 import { createCycles } from './cycles.js';
 import { createBatons } from './baton.js';
 import { createDigitizer } from './digitize.js';
+import { createEndOfLine } from './endofline.js';
+import { cssFilter } from './grade.js';
 import { createControls } from './controls.js';
 import { createHud } from './hud.js';
 import { createDemo } from './demo.js';
@@ -33,7 +36,8 @@ import { createDemo } from './demo.js';
 export const meta = {
   title: 'Tron',
   hint: 'point: light wall · rock: switch colour · ok: identity disc, flick to throw · '
-    + 'thumbs up: light cycle · peace: digitize · shaka: light baton · fist: derezz · both palms open: portal',
+    + 'thumbs up: light cycle · peace: digitize · shaka: light baton · fist (hold): derezz · '
+    + 'two fists together: end of line · both palms open: portal',
 };
 
 const RENDER = {
@@ -63,7 +67,7 @@ export function createEffect({ container, hands }) {
   const events = [];   // recent actions, for the stats
   const log = (name) => {
     events.push(`${seconds.toFixed(2)} ${name}`);
-    if (events.length > 24) events.shift();
+    if (events.length > 40) events.shift();
   };
 
   const teams = createTeams();
@@ -75,9 +79,11 @@ export function createEffect({ container, hands }) {
   const discs = createDiscs({ view, teams, walls, batons, stage, voxels, flashes, log });
   const cycles = createCycles({ view, teams, stage, voxels, flashes, log });
   const digitizer = createDigitizer({ hands, view, voxels, flashes, log });
+  const endOfLine = createEndOfLine({ log });
   scene.add(stage.group, digitizer.group, cycles.group, walls.object, discs.group, batons.group, voxels.mesh, flashes.group);
-  const controls = createControls({ hands, view, teams, walls, discs, cycles, batons, digitizer, voxels, flashes, stage, log });
-  const hud = createHud(container, { hands, view, teams, controls });
+  const controls = createControls({ hands, view, teams, walls, discs, cycles, batons, digitizer, endOfLine,
+    voxels, flashes, stage, log });
+  const hud = createHud(container, { hands, view, teams, controls, endOfLine });
   const demo = createDemo();
 
   const composer = new EffectComposer(renderer);
@@ -125,10 +131,11 @@ export function createEffect({ container, hands }) {
   let lastMs = startMs;
 
   return {
-    // inside the Grid (grade.js); the host reads it every frame, and the
-    // digitizing laser dims it while the person is digitized
+    // inside the Grid (grade.js); the host reads it every frame. The
+    // digitizing laser dims it while the person is digitized, and so does
+    // END OF LINE while the Grid is down.
     get cameraFilter() {
-      return digitizer.cameraFilter();
+      return cssFilter(Math.min(digitizer.brightness, endOfLine.brightness()));
     },
     demoScript: (t) => demo.script(t),
 
@@ -137,6 +144,7 @@ export function createEffect({ container, hands }) {
       lastMs = nowMs;
       const dt = Math.min(1 / 20, Math.max(1 / 240, hostDt));
       seconds = (nowMs - startMs) / 1000;
+      endOfLine.update(seconds);
       teams.left.update(dt);
       teams.right.update(dt);
       controls.update(nowMs, seconds, dt);
@@ -145,7 +153,7 @@ export function createEffect({ container, hands }) {
       walls.update(seconds);
       voxels.update(seconds);
       flashes.update(seconds);
-      stage.update(seconds, controls.portal, controls.tethers, cycles.lights());
+      stage.update(seconds, controls.portal, controls.tethers, cycles.lights(), endOfLine.light());
       // after the stage, so the cycles are projected with this frame's floor
       cycles.draw();
     },
@@ -164,7 +172,6 @@ export function createEffect({ container, hands }) {
         teams: `${teams.left.name}/${teams.right.name}`,
         wallLength: Number(walls.length.toFixed(2)),
         trails: walls.trailCount,
-        turns: walls.turnCount,
         voxels: voxels.alive,
         discs: discs.list.map((disc) => `${disc.owner}:${disc.state}`).join(' '),
         discCounts: { ...discs.counts },
@@ -175,6 +182,7 @@ export function createEffect({ container, hands }) {
           runs: digitizer.segmenterRuns, masks: digitizer.maskFrames },
         portal: Number(controls.portal.strength.toFixed(2)),
         derezz: controls.counts.derezz,
+        endOfLine: endOfLine.count,
         teamSwitches: controls.counts.teamSwitches,
         events: events.join(', '),
         effectFps: measuredFps,

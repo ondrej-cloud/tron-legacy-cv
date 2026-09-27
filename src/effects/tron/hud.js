@@ -2,7 +2,9 @@
 // tracked hand, in that hand's team colour: a bracket, the 21-point
 // skeleton, the hand's team, its gesture and what it is doing, five finger
 // bars (how straight each finger is), which side of the hand faces the
-// camera, and small readouts. Thin crisp lines, a faint flicker and scanlines.
+// camera, and small readouts. A fist that charges up shows a ring filling
+// around it, and END OF LINE is typed in the middle of the screen when the
+// Grid shuts down. Thin crisp lines, a faint flicker and scanlines.
 import { HAND_CONNECTIONS } from '../../hands.js';
 
 const HUD = {
@@ -18,7 +20,7 @@ const FINGERS = ['thumb', 'index', 'middle', 'ring', 'pinky'];
 const GESTURE_NAMES = { thumbsUp: 'THUMBS UP', none: '' };
 const WHITE = '226, 250, 255';
 
-export function createHud(container, { hands, view, teams, controls }) {
+export function createHud(container, { hands, view, teams, controls, endOfLine }) {
   const canvas = document.createElement('canvas');
   container.appendChild(canvas);
   const context = canvas.getContext('2d');
@@ -210,6 +212,101 @@ export function createHud(container, { hands, view, teams, controls }) {
     context.letterSpacing = '0px';
   }
 
+  // view units -> CSS pixels
+  const toScreen = (point) => ({
+    x: (point.x / view.aspect + 0.5) * view.width,
+    y: (0.5 - point.y) * view.height,
+  });
+
+  // A ring that fills clockwise from the top as a gesture charges, with a
+  // tick for every step and a label beside it (towards the middle of the
+  // screen) or under it.
+  function chargeRing(center, radius, charge, accent, label, labelSide = 0) {
+    const { x, y } = toScreen(center);
+    drawn.push([x - radius - 130, y - radius - 20, 2 * radius + 260, 2 * radius + 50]);
+    const start = -Math.PI / 2;
+    context.lineWidth = 1;
+    context.strokeStyle = `rgba(${accent}, 0.3)`;
+    context.beginPath();
+    context.arc(x, y, radius, 0, Math.PI * 2);
+    context.stroke();
+    context.lineWidth = 2.5;
+    context.strokeStyle = `rgba(${accent}, 0.95)`;
+    context.shadowColor = `rgba(${accent}, 0.9)`;
+    context.shadowBlur = 8;
+    context.beginPath();
+    context.arc(x, y, radius, start, start + charge * Math.PI * 2);
+    context.stroke();
+    context.shadowBlur = 0;
+    const ticks = 24;
+    context.lineWidth = 1.2;
+    for (let k = 0; k < ticks; k++) {
+      const angle = start + (k / ticks) * Math.PI * 2;
+      const lit = k / ticks < charge;
+      context.strokeStyle = lit ? `rgba(${WHITE}, 0.9)` : `rgba(${accent}, 0.35)`;
+      context.beginPath();
+      context.moveTo(x + Math.cos(angle) * (radius + 4), y + Math.sin(angle) * (radius + 4));
+      context.lineTo(x + Math.cos(angle) * (radius + (lit ? 10 : 7)), y + Math.sin(angle) * (radius + (lit ? 10 : 7)));
+      context.stroke();
+    }
+    const text = `${label} ${Math.round(charge * 100)}%`;
+    if (labelSide) {
+      glowText(text, x + labelSide * (radius + 16), y + 4, accent, 0.95, 10,
+        { weight: 700, align: labelSide > 0 ? 'left' : 'right', spacing: 0.25 });
+    } else {
+      glowText(text, x, y + radius + 26, accent, 0.95, 10, { weight: 700, align: 'center', spacing: 0.25 });
+    }
+  }
+
+  function drawCharges() {
+    for (const id of ['left', 'right']) {
+      const state = controls.states[id];
+      const hand = hands[id];
+      if (!hand.visible || state.fistCharge <= 0) continue;
+      chargeRing(state.palm, hand.size * view.height * 0.85, state.fistCharge, teams[id].cssRgb(), 'DEREZZ',
+        state.palm.x < 0 ? 1 : -1);
+    }
+    const pair = controls.pair;
+    if (pair.charge > 0) {
+      chargeRing(pair, pair.radius * view.height, pair.charge, teams.left.cssRgb(), 'END OF LINE');
+    }
+  }
+
+  // END OF LINE, typed in the middle of the screen between two rules
+  function drawEndOfLine(seconds) {
+    const caption = endOfLine.caption();
+    if (!caption) return;
+    const x = view.width / 2;
+    const y = view.height * 0.42;
+    const accent = teams.left.cssRgb();
+    // a broken signal: the words flicker and now and then drop out for a frame
+    const flicker = hash(Math.floor(seconds * 24)) < 0.08 ? 0.25 : 0.88 + 0.12 * hash(Math.floor(seconds * 40) + 0.3);
+    const alpha = caption.alpha * flicker;
+    const shown = Math.floor(caption.text.length * caption.typed);
+    const text = caption.text.slice(0, shown) + (caption.typed < 1 || Math.floor(seconds * 3) % 2 ? '\u2588' : ' ');
+    const size = Math.round(Math.min(64, view.width / 16));
+    drawn.push([0, y - size * 1.6, view.width, size * 3.4]);
+    context.font = `200 ${size}px "Helvetica Neue", "Avenir Next", "Segoe UI", Arial, sans-serif`;
+    context.letterSpacing = '0.5em';
+    context.textAlign = 'center';
+    const fullWidth = context.measureText(caption.text).width;
+    context.shadowColor = `rgba(${accent}, ${0.9 * alpha})`;
+    context.shadowBlur = 18;
+    context.fillStyle = `rgba(${WHITE}, ${alpha})`;
+    context.fillText(text, x + size * 0.25, y + size * 0.35);
+    context.shadowBlur = 0;
+    context.letterSpacing = '0px';
+    // the rules draw out from the middle as the words are typed
+    const reach = (fullWidth / 2 + size) * Math.min(1, caption.typed * 1.4);
+    context.fillStyle = `rgba(${accent}, ${0.85 * alpha})`;
+    for (const offset of [-size * 0.95, size * 0.75]) {
+      context.fillRect(x - reach, y + offset, reach * 2, 1);
+      context.fillRect(x - reach, y + offset - 3, 1, 7);
+      context.fillRect(x + reach - 1, y + offset - 3, 1, 7);
+    }
+    glowText('// SYSTEM HALT', x, y + size * 1.25, accent, 0.8 * alpha, 11, { align: 'center', spacing: 0.4 });
+  }
+
   // a faint hash per time step, for flicker and glitches
   const hash = (value) => {
     const s = Math.sin(value * 127.1) * 43758.5453;
@@ -235,7 +332,10 @@ export function createHud(container, { hands, view, teams, controls }) {
         if (hand.landmarks) drawHand(hand, nowMs, dt, teams[hand.id].cssRgb());
       }
       for (const id of ['left', 'right']) if (!hands[id].visible) boxes[id] = null;
+      drawCharges();
       context.globalAlpha = 1;
+      context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+      drawEndOfLine(seconds);
       context.setTransform(1, 0, 0, 1, 0, 0);
       context.globalCompositeOperation = 'destination-out';
       context.fillStyle = scanlines;

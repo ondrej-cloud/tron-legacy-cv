@@ -27,7 +27,7 @@ export const DISC = {
   bounceDamping: 0.94,
   minFreeFlight: 1.1,       // s: it flies free at least this long ...
   settleTime: 0.6,          // ... and until it hasn't hit anything for this long ...
-  maxFreeFlight: 2.6,       // ... but no longer than this, then it homes in
+  maxFreeFlight: 2.2,       // ... but no longer than this, then it homes in
   hitReach: 0.9,            // share of the disc's radius that collides
   batonReach: 0.55,         // ... with a baton (the disc is seen at an angle)
   batonRestitution: 0.9,
@@ -76,7 +76,8 @@ const discFragment = /* glsl */`
     // summoning draws the disc in, clockwise from the top
     float sweep = fract(0.25 - angle / TAU);
     float reveal = 1.0 - smoothstep(uProgress - 0.015, uProgress, sweep);
-    float spark = uProgress < 1.0 ? exp(-pow((sweep - uProgress) * 30.0, 2.0)) * band(r, 0.6, 0.85, aa) : 0.0;
+    float behind = (sweep - uProgress) * 30.0;
+    float spark = uProgress < 1.0 ? exp(-behind * behind) * band(r, 0.6, 0.85, aa) : 0.0;
 
     float turn = fract((angle - uSpin) / TAU);
     float segment = fract(turn * 5.0);
@@ -222,14 +223,14 @@ export function createDiscs({ view, teams, walls, batons, stage, voxels, flashes
         const localY = Math.sin(around) * radius * disc.squash;
         const offsetX = localX * cos - localY * sin;
         const offsetY = localX * sin + localY * cos;
-        const outward = (0.35 + Math.random() * 0.45) / Math.max(radius, 1e-3);
+        const outward = (0.18 + Math.random() * 0.25) / Math.max(radius, 1e-3);
         voxels.spawn({
           x: disc.x + offsetX,
           y: disc.y + offsetY,
           vx: offsetX * outward + disc.vx * 0.3 + (Math.random() - 0.5) * 0.08,
           vy: offsetY * outward + disc.vy * 0.3 + (Math.random() - 0.5) * 0.08,
           size: size * (0.7 + Math.random() * 0.6),
-          life: 1.1 + Math.random() * 1.0,
+          life: 0.8 + Math.random() * 0.7,
           heat: 0.5,
           color: colorOf(disc),
           delay: Math.random() * 0.06,
@@ -272,7 +273,7 @@ export function createDiscs({ view, teams, walls, batons, stage, voxels, flashes
     disc.angle = easeTowards(disc.angle, clamp(hand.roll * 0.4, -0.5, 0.5), dt, 0.15);
   }
 
-  function fly(disc, hand, dt, wallRuns) {
+  function fly(disc, hand, dt, wallSegments) {
     disc.flightTime += dt;
     const settled = disc.flightTime > DISC.minFreeFlight && now - disc.lastHitAt > DISC.settleTime;
     if (disc.state === 'flying' && (settled || disc.flightTime > DISC.maxFreeFlight)) {
@@ -313,7 +314,7 @@ export function createDiscs({ view, teams, walls, batons, stage, voxels, flashes
     disc.x += disc.vx * dt;
     disc.y += disc.vy * dt;
     // a returning disc flies over the walls on its way home
-    if (disc.state === 'flying') bounceOffWalls(disc, fromX, fromY, wallRuns);
+    if (disc.state === 'flying') bounceOffWalls(disc, fromX, fromY, wallSegments);
     bounceOffBatons(disc, fromX, fromY);
     ricochet(disc);
     disc.spin += DISC.flightSpin * dt;
@@ -358,52 +359,63 @@ export function createDiscs({ view, teams, walls, batons, stage, voxels, flashes
     }
   }
 
-  // Swept test against every wall run: the disc's centre crosses into the
-  // band of the wall's thickness plus the disc's own reach along the wall's
-  // normal. The earliest crossing this frame wins.
-  function bounceOffWalls(disc, fromX, fromY, wallRuns) {
+  // Swept test against every segment of wall: the wall is a band around its
+  // middle line (half the extrusion up from the base), as thick as the
+  // extrusion looks across that segment, and the disc collides when its
+  // centre crosses into that band widened by the disc's own reach. The
+  // earliest crossing this frame wins; the velocity is reflected off the
+  // segment, so curved walls bounce as they should.
+  function bounceOffWalls(disc, fromX, fromY, segments) {
     const extrude = walls.extrude;
-    const reachX = disc.radius * DISC.hitReach;
-    const reachY = disc.radius * disc.squash * DISC.hitReach;
+    const rx = disc.radius * DISC.hitReach;
+    const ry = disc.radius * disc.squash * DISC.hitReach;
+    const moveX = disc.x - fromX;
+    const moveY = disc.y - fromY;
     let best = null;
-    for (const run of wallRuns) {
-      const horizontal = run.horizontal;
-      // the wall leans, so its band sits half an extrusion off the base line
-      const half = (horizontal ? extrude.y : extrude.x) / 2;
-      const center = horizontal ? run.y0 + half : run.x0 + half;
-      const reach = half + (horizontal ? reachY : reachX);
-      const before = (horizontal ? fromY : fromX) - center;
-      const after = (horizontal ? disc.y : disc.x) - center;
+    for (const segment of segments) {
+      const ax = segment.x0 + extrude.x / 2;
+      const ay = segment.y0 + extrude.y / 2;
+      const dx = segment.x1 - segment.x0;
+      const dy = segment.y1 - segment.y0;
+      const length = Math.hypot(dx, dy);
+      const tx = dx / length;
+      const ty = dy / length;
+      const nx = -ty;
+      const ny = tx;
+      const half = Math.abs(tx * extrude.y - ty * extrude.x) / 2;
+      const discReach = Math.hypot(rx * nx, ry * ny);
+      const reach = half + discReach;
+      const before = (fromX - ax) * nx + (fromY - ay) * ny;
+      const after = before + moveX * nx + moveY * ny;
       let t;
       if (before >= reach && after < reach) t = (before - reach) / (before - after);
       else if (before <= -reach && after > -reach) t = (-reach - before) / (after - before);
       else continue;
-      const shift = (horizontal ? extrude.x : extrude.y) / 2;
-      const along = horizontal ? fromX + (disc.x - fromX) * t : fromY + (disc.y - fromY) * t;
-      const start = horizontal ? run.x0 : run.y0;
-      const end = horizontal ? run.x1 : run.y1;
-      const slack = (horizontal ? reachX : reachY) * 0.5;
-      if (along < Math.min(start, end) + shift - slack || along > Math.max(start, end) + shift + slack) continue;
-      if (!best || t < best.t) best = { t, run, side: Math.sign(before), along, center, half, shift, start };
+      if (best && t >= best.t) continue;
+      const along = (fromX + moveX * t - ax) * tx + (fromY + moveY * t - ay) * ty;
+      const slack = discReach * 0.5;
+      if (along < -slack || along > length + slack) continue;
+      best = { t, segment, side: Math.sign(before), nx, ny, tx, ty, ax, ay, half, along };
     }
     if (!best) return;
-    const { t, run, side, along, center, half, shift, start } = best;
-    disc.x = fromX + (disc.x - fromX) * t;
-    disc.y = fromY + (disc.y - fromY) * t;
-    if (run.horizontal) disc.vy = -disc.vy * DISC.bounceDamping;
-    else disc.vx = -disc.vx * DISC.bounceDamping;
+    const { t, segment, side, nx, ny, tx, ty, ax, ay, half, along } = best;
+    disc.x = fromX + moveX * t;
+    disc.y = fromY + moveY * t;
+    const normalSpeed = disc.vx * nx + disc.vy * ny;
+    disc.vx -= (1 + DISC.bounceDamping) * normalSpeed * nx;
+    disc.vy -= (1 + DISC.bounceDamping) * normalSpeed * ny;
     disc.bounces++;
     disc.lastHitAt = now;
     counts.bounces++;
     counts.wallHits++;
     logFor('wall hit', disc);
-    const contact = run.horizontal ? { x: along, y: center + side * half } : { x: center + side * half, y: along };
-    const normal = run.horizontal ? { x: 0, y: side } : { x: side, y: 0 };
-    const wallColor = teams.colors[run.team];
+    const onWall = Math.min(Math.max(along, 0), Math.hypot(segment.x1 - segment.x0, segment.y1 - segment.y0));
+    const contact = { x: ax + tx * onWall + nx * side * half, y: ay + ty * onWall + ny * side * half };
+    const wallColor = teams.colors[segment.team];
     flashes.spawn({ x: contact.x, y: contact.y, size: 0.11, duration: 0.4, color: colorOf(disc), glint: 1 });
-    sparks(contact.x, contact.y, normal.x, normal.y, colorOf(disc), 10);
-    sparks(contact.x, contact.y, normal.x, normal.y, wallColor, 8, 0.7);
-    walls.pulse(run.trail, run.along0 + Math.abs(along - shift - start), now);
+    sparks(contact.x, contact.y, nx * side, ny * side, colorOf(disc), 10);
+    sparks(contact.x, contact.y, nx * side, ny * side, wallColor, 8, 0.7);
+    walls.pulse(segment.trail, segment.along0 + onWall, now);
   }
 
   // A light baton bats a flying disc away (one on its way home passes): the
@@ -555,6 +567,13 @@ export function createDiscs({ view, teams, walls, batons, stage, voxels, flashes
     summon,
     throwDisc,
     shatter,
+    // a derezz wave: every disc within `radius` of `origin` shatters
+    shatterWithin(origin, radius) {
+      for (const disc of discs) {
+        if (disc.state === 'gone' || disc.state === 'fading') continue;
+        if (Math.hypot(disc.x - origin.x, disc.y - origin.y) < radius + disc.radius * 0.5) shatter(disc);
+      }
+    },
     // put away: a held disc fades out of the hand (a baton takes its place)
     dismiss(disc) {
       if (disc.state !== 'held') return;
@@ -568,13 +587,13 @@ export function createDiscs({ view, teams, walls, batons, stage, voxels, flashes
     // hands: { left, right } each { visible, palm, open, size, roll } in view units
     update(time, dt, hands) {
       now = time;
-      const wallRuns = discs.some((disc) => disc.state === 'flying') ? walls.runs(now) : [];
+      const wallSegments = discs.some((disc) => disc.state === 'flying') ? walls.segments(now) : [];
       for (const disc of discs) {
         disc.stateTime += dt;
         disc.flash = Math.max(0, disc.flash - dt * 2.5);
         const hand = hands[disc.owner];
         if (disc.state === 'summoning' || disc.state === 'held') followHand(disc, hand, dt);
-        else if (thrown(disc)) fly(disc, hand, dt, wallRuns);
+        else if (thrown(disc)) fly(disc, hand, dt, wallSegments);
         else if (disc.state === 'fading') {
           disc.alpha = Math.max(0, 1 - disc.stateTime / DISC.fadeTime);
           disc.x += disc.vx * dt;

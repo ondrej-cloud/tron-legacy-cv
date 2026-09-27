@@ -1,6 +1,7 @@
 // The stage: one fullscreen pass with the Grid floor along the bottom of the
 // frame, the portal's beam of light, the local flash when a hand switches
 // team and the derezz shock rings, plus the particles rising in the portal.
+// The Grid's lights can be powered down and rebooted (endofline.js).
 //
 // The floor is seen by a camera `cameraHeight` above it, looking level at
 // the horizon. A floor point (x, z) in grid space, at height h, shows at
@@ -53,6 +54,7 @@ const stageFragment = /* glsl */`
   uniform vec4 uCycle[${STAGE.cycleLights}];   // view x, y, strength, size
   uniform vec3 uCycleColor[${STAGE.cycleLights}];
   uniform float uRiding;         // 0..1, a light cycle is on the floor
+  uniform vec3 uPower;           // floor lights, horizon line, how far out the horizon reaches (0..1)
   varying vec2 vUv;
 
   const float TAU = 6.28318530718;
@@ -97,18 +99,26 @@ const stageFragment = /* glsl */`
 
     // the beam's reflection on the glossy floor
     float dx = p.x - uPortal.x;
-    float reflection = exp(-pow(dx / (uPortal.y * 0.22 + 2.0 * uPixel), 2.0)) * exp(-below * 4.5)
+    float across = dx / (uPortal.y * 0.22 + 2.0 * uPixel);
+    float reflection = exp(-across * across) * exp(-below * 4.5)
       * (0.65 + 0.35 * sin(below * 150.0 - uTime * 5.0));
     col += mix(sideColor(p.x, uPortal.y * 0.3 + 0.01), vec3(1.0), 0.4) * reflection * uPortal.z * 0.35;
     return col * onFloor;
   }
 
   vec3 horizonLine(vec2 p) {
+    float reach = uPower.z * uAspect * 0.5;
+    float drawn = 1.0 - smoothstep(reach - 0.01, reach, abs(p.x));
+    // the tips of a horizon that is still drawing out glow white
+    float fromTip = (abs(p.x) - reach) / 0.02;
+    float tips = exp(-fromTip * fromTip) * step(uPower.z, 0.999);
     float d = abs(p.y - HORIZON);
     float strength = ${STAGE.idleHorizon.toFixed(3)} + uPortal.z * 0.6 + uRiding * 0.25;
     float nearPortal = 0.55 + 0.45 * exp(-abs(p.x - uPortal.x) * 2.5 * (1.0 - uPortal.z * 0.6));
     float line = crispLine(d, 0.5 * uPixel) * 1.3 + exp(-d * 90.0) * 0.18;
-    return mix(sideColor(p.x, 0.45), vec3(1.0), 0.25) * line * strength * nearPortal;
+    vec3 col = mix(sideColor(p.x, 0.45), vec3(1.0), 0.25) * line * strength * nearPortal * drawn;
+    col += vec3(1.0) * line * tips * 2.0;
+    return col * uPower.y;
   }
 
   vec3 beam(vec2 p) {
@@ -122,8 +132,10 @@ const stageFragment = /* glsl */`
     float above = smoothstep(uPortal.w + 0.02, uPortal.w + 0.24, p.y);
     float shimmer = 0.85 + 0.15 * sin(p.y * 90.0 - uTime * 14.0) * sin(p.y * 23.0 + uTime * 5.0);
     float core = crispLine(abs(dx), 0.9 * uPixel);
-    float coreGlow = exp(-pow(dx / (halfWidth * 0.04 + 2.0 * uPixel), 2.0));
-    float inner = exp(-pow(dx / (halfWidth * 0.3), 2.0));
+    float coreX = dx / (halfWidth * 0.04 + 2.0 * uPixel);
+    float innerX = dx / (halfWidth * 0.3);
+    float coreGlow = exp(-coreX * coreX);
+    float inner = exp(-innerX * innerX);
     float outer = exp(-abs(dx) / (halfWidth * 0.9));
     float height = clamp((p.y - HORIZON) / max(uPortal.w - HORIZON, 0.05), 0.0, 1.0);
     float edges = crispLine(abs(abs(dx) - halfWidth), 0.5 * uPixel) * (1.0 - above) * mix(1.0, 0.5, height);
@@ -205,7 +217,7 @@ const stageFragment = /* glsl */`
 
   void main() {
     vec2 p = vec2((vUv.x - 0.5) * uAspect, vUv.y - 0.5);
-    vec3 col = gridFloor(p) + horizonLine(p) + beam(p) + tethers(p) + sweeps(p) + shocks(p);
+    vec3 col = (gridFloor(p) + beam(p) + tethers(p)) * uPower.x + horizonLine(p) + sweeps(p) + shocks(p);
     gl_FragColor = vec4(col, 1.0);
   }
 `;
@@ -263,6 +275,7 @@ export function createStage(view, teams) {
     uCycle: { value: Array.from({ length: STAGE.cycleLights }, () => new THREE.Vector4()) },
     uCycleColor: { value: Array.from({ length: STAGE.cycleLights }, () => new THREE.Color()) },
     uRiding: { value: 0 },
+    uPower: { value: new THREE.Vector3(1, 1, 1) },
   };
   const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), additiveMaterial(fullscreenVertex, stageFragment, uniforms));
   quad.frustumCulled = false;
@@ -317,8 +330,10 @@ export function createStage(view, teams) {
       shock.color.copy(color);
     },
     // portal: { x, halfWidth, strength, handsY, age }, tethers: [{x, y, strength}] (left, right),
-    // cycleLights: [{ x, y, strength, size, color }]
-    update(time, portal, tethers, cycleLights) {
+    // cycleLights: [{ x, y, strength, size, color }],
+    // light: { floor, horizon, reveal } (endofline.js)
+    update(time, portal, tethers, cycleLights, light) {
+      uniforms.uPower.value.set(light.floor, light.horizon, light.reveal);
       const dt = Math.min(0.1, Math.max(0, time - now));
       now = time;
       uniforms.uTime.value = time;
@@ -332,7 +347,7 @@ export function createStage(view, teams) {
       vanish += (portal.x * portal.strength - vanish) * (1 - Math.exp(-dt / 0.3));
       uniforms.uVanish.value = vanish;
       tethers.forEach((tether, index) => uniforms.uTether.value[index].set(tether.x, tether.y, tether.strength, 0));
-      particles.visible = portal.strength > 0.002;
+      particles.visible = portal.strength * light.floor > 0.002;
 
       ['left', 'right'].forEach((id, index) => {
         const sweep = sweepState[id];

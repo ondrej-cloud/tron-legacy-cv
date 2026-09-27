@@ -135,32 +135,52 @@ function glowDot(context, x, y, radius, color, alpha) {
   context.restore();
 }
 
-// Points along a polyline, up to a fraction of its total length.
-function partialPath(points, fraction) {
-  const lengths = [];
-  let total = 0;
-  for (let index = 1; index < points.length; index++) {
-    const length = Math.hypot(points[index].x - points[index - 1].x, points[index].y - points[index - 1].y);
-    lengths.push(length);
-    total += length;
+// A light wall as a ribbon of glass hanging below `points`: a bright top
+// edge, a translucent body that fades towards a faint bottom edge. The body
+// is stacked thin strokes of the same path, so it follows any curve.
+// `body` sets how much light the glass holds; `tail` = { from, to } fades the
+// ribbon in horizontally from x = from to x = to.
+function drawRibbon(context, points, { height, alpha = 1, body = 0.26, s, tail = null }) {
+  if (points.length < 2 || alpha <= 0) return;
+  const paint = (color, amount) => {
+    if (!tail) return `rgba(${color}, ${amount})`;
+    const gradient = context.createLinearGradient(tail.from, 0, tail.to, 0);
+    gradient.addColorStop(0, `rgba(${color}, 0)`);
+    gradient.addColorStop(1, `rgba(${color}, ${amount})`);
+    return gradient;
+  };
+  const trace = (dy) => {
+    context.beginPath();
+    context.moveTo(points[0].x, points[0].y + dy);
+    for (const point of points.slice(1)) context.lineTo(point.x, point.y + dy);
+  };
+  context.save();
+  context.globalCompositeOperation = 'lighter';
+  context.lineJoin = 'round';
+  context.lineCap = 'butt';
+  const layers = 8;
+  const step = height / layers;
+  context.lineWidth = step;
+  for (let layer = 0; layer < layers; layer++) {
+    trace(step * (layer + 0.5));
+    context.strokeStyle = paint(BLUE, alpha * body * (1 - layer / layers) ** 1.4);
+    context.stroke();
   }
-  let remaining = clamp01(fraction) * total;
-  const result = [points[0]];
-  for (let index = 1; index < points.length; index++) {
-    const length = lengths[index - 1];
-    if (remaining >= length) {
-      result.push(points[index]);
-      remaining -= length;
-      continue;
-    }
-    const amount = length > 0 ? remaining / length : 0;
-    result.push({
-      x: mix(points[index - 1].x, points[index].x, amount),
-      y: mix(points[index - 1].y, points[index].y, amount),
-    });
-    break;
-  }
-  return result;
+  trace(height);
+  context.strokeStyle = paint(CYAN, 0.22 * alpha);
+  context.lineWidth = 0.7 * s;
+  context.stroke();
+  trace(0);
+  context.strokeStyle = paint(BLUE, 0.3 * alpha);
+  context.lineWidth = 4 * s;
+  context.stroke();
+  context.strokeStyle = paint(CYAN, 0.9 * alpha);
+  context.lineWidth = 1.5 * s;
+  context.stroke();
+  context.strokeStyle = paint(WHITE, alpha);
+  context.lineWidth = 0.7 * s;
+  context.stroke();
+  context.restore();
 }
 
 // Each scene draws one frame of a control at loop time t (0..LOOP) on a
@@ -168,20 +188,22 @@ function partialPath(points, fraction) {
 
 function pointScene(context, t, w, h, s) {
   const size = h * 0.29;
-  // the fingertip draws a wall with a right-angle turn, like a light cycle
-  const route = [
-    { x: w * 0.14, y: h * 0.46 }, { x: w * 0.52, y: h * 0.46 },
-    { x: w * 0.52, y: h * 0.2 }, { x: w * 0.88, y: h * 0.2 },
-  ];
+  // the fingertip draws one smooth, flowing curve of glass
+  const route = (u) => ({
+    x: w * (0.1 + 0.8 * u),
+    y: h * (0.36 + 0.11 * Math.sin(u * Math.PI * 2 - 0.5)),
+  });
   const drawing = ramp(t, 0.55, 2.55);
   const fade = 1 - ramp(t, 2.9, 3.45);
   const pose = blendPoses(POSES.open, POSES.point, ramp(t, 0.05, 0.45));
-  const tipTarget = partialPath(route, drawing).at(-1);
-  // place the hand so that its index fingertip sits on the route
+  const drawn = [];
+  for (let step = 0; step <= 48; step++) drawn.push(route((step / 48) * drawing));
+  const tipTarget = drawn.at(-1);
+  // place the hand so that its index fingertip sits on the curve
   const probe = handPoints(pose, { x: 0, y: 0, size, roll: 0.1 });
   const points = probe.map((point) => ({
     x: point.x + tipTarget.x - probe[8].x, y: point.y + tipTarget.y - probe[8].y, z: point.z }));
-  if (drawing > 0) drawLightLine(context, partialPath(route, drawing), BLUE, fade, s);
+  if (drawing > 0) drawRibbon(context, drawn, { height: h * 0.15, alpha: fade, s });
   drawHand(context, points, { pose, alpha: 0.4 + 0.6 * fade, scale: s });
   if (drawing > 0 && drawing < 1) glowDot(context, tipTarget.x, tipTarget.y, 8 * s, CYAN, 0.9);
 }
@@ -236,30 +258,6 @@ function drawDisc(context, x, y, radius, alpha, s, spin) {
 // Where a disc held in the OK hand sits, for a hand placed at (x, y).
 const discRest = (x, y, size) => ({ x: x + size * 1.2, y: y - size * 0.85 });
 
-function okScene(context, t, w, h, s) {
-  const size = h * 0.28;
-  const toOk = ramp(t, 0.1, 0.5) * (1 - ramp(t, 3.15, 3.5));
-  const pose = blendPoses(POSES.open, POSES.ok, toOk);
-  const handX = w * 0.3;
-  const handY = h * 0.64;
-  const points = hand(context, pose, { x: handX, y: handY, size, roll: 0.1 }, { scale: s });
-  if (toOk > 0.8) {
-    // the "O" between thumb and index
-    const ring = { x: (points[4].x + points[8].x) / 2, y: (points[4].y + points[8].y) / 2 };
-    glowDot(context, ring.x, ring.y, 6 * s, CYAN, 0.7 * (toOk - 0.8) / 0.2);
-  }
-  // the disc rezzes in beside the hand: a flash, then the rings grow out of it
-  const rest = discRest(handX, handY, size);
-  const radius = h * 0.1;
-  const rez = ramp(t, 0.55, 1.1);
-  const gone = ramp(t, 2.9, 3.25);
-  const alpha = rez * (1 - gone);
-  if (alpha <= 0) return;
-  const bob = Math.sin(t * 3) * h * 0.012;
-  if (t < 0.9) glowDot(context, rest.x, rest.y, 12 * s, WHITE, Math.sin(Math.PI * ramp(t, 0.5, 0.9)));
-  drawDisc(context, rest.x, rest.y + bob, radius * (0.3 + 0.7 * rez), alpha, s, t * 4);
-}
-
 // Bounces a coordinate between lo and hi, like a disc off two walls.
 function reflect(value, lo, hi) {
   const span = hi - lo;
@@ -267,22 +265,33 @@ function reflect(value, lo, hi) {
   return lo + (u < span ? u : 2 * span - u);
 }
 
-function flickScene(context, t, w, h, s) {
+function okScene(context, t, w, h, s) {
   const size = h * 0.26;
-  const throwAt = 1.05;
-  const catchAt = 2.75;
-  // a wind-up, then the hand whips sideways and opens
-  const windUp = ramp(t, 0.7, throwAt) * (1 - ramp(t, throwAt, throwAt + 0.08));
-  const whip = ramp(t, throwAt, throwAt + 0.12) * (1 - ramp(t, 2.2, catchAt));
-  const pose = blendPoses(POSES.ok, POSES.open, ramp(t, throwAt, throwAt + 0.1) * (1 - ramp(t, catchAt, catchAt + 0.25)));
+  const throwAt = 1.45;
+  const catchAt = 3.0;
+  // the OK sign summons the disc, then a flick of the hand throws it
+  const toOk = ramp(t, 0.1, 0.45) * (1 - ramp(t, throwAt, throwAt + 0.1)) + ramp(t, catchAt, catchAt + 0.15);
+  const pose = blendPoses(POSES.open, POSES.ok, Math.min(1, toOk) * (1 - ramp(t, 3.35, 3.6)));
+  const windUp = ramp(t, 1.15, throwAt) * (1 - ramp(t, throwAt, throwAt + 0.08));
+  const whip = ramp(t, throwAt, throwAt + 0.12) * (1 - ramp(t, 2.4, catchAt));
   const handX = w * (0.26 - 0.04 * windUp + 0.12 * whip);
   const handY = h * 0.64;
-  hand(context, pose, { x: handX, y: handY, size, roll: 0.1 - 0.25 * windUp + 0.45 * whip }, { scale: s });
+  const points = hand(context, pose, { x: handX, y: handY, size, roll: 0.1 - 0.25 * windUp + 0.45 * whip },
+    { scale: s });
+  if (t < throwAt && toOk > 0.8) {
+    // the "O" between thumb and index
+    const ring = { x: (points[4].x + points[8].x) / 2, y: (points[4].y + points[8].y) / 2 };
+    glowDot(context, ring.x, ring.y, 6 * s, CYAN, 0.7 * (toOk - 0.8) / 0.2);
+  }
 
   const radius = h * 0.085;
   const rest = discRest(handX, handY, size);
+  const rez = ramp(t, 0.45, 0.95);
+  const alpha = rez * (1 - ramp(t, 3.3, 3.55));
+  if (alpha <= 0) return;
   if (t < throwAt || t > catchAt + 0.05) {
-    drawDisc(context, rest.x, rest.y, radius, 1, s, t * 4);
+    if (t < 0.85) glowDot(context, rest.x, rest.y, 12 * s, WHITE, Math.sin(Math.PI * ramp(t, 0.4, 0.85)));
+    drawDisc(context, rest.x, rest.y, radius * (0.3 + 0.7 * rez), alpha, s, t * 4);
     if (t > catchAt && t < catchAt + 0.3) glowDot(context, rest.x, rest.y, 12 * s, CYAN, 1 - (t - catchAt) / 0.3);
     return;
   }
@@ -307,6 +316,59 @@ function flickScene(context, t, w, h, s) {
   }
 }
 
+// Stable pseudo-random 0..1 for integer inputs.
+function hash(a, b) {
+  const value = Math.sin(a * 127.1 + b * 311.7) * 43758.5453;
+  return value - Math.floor(value);
+}
+
+function twoFistsScene(context, t, w, h, s) {
+  const size = h * 0.27;
+  const meetAt = 0.95;
+  // two fists come together, knuckles first, and part again at the end
+  const close = ramp(t, 0.2, meetAt) * (1 - ramp(t, 2.9, 3.4));
+  const fist = ramp(t, 0.05, 0.4) * (1 - ramp(t, 3.2, 3.55));
+  const pose = blendPoses(POSES.open, POSES.fist, fist);
+  const gap = mix(w * 0.3, size * 0.62, close);
+  const y = h * 0.66;
+  const shutdown = ramp(t, meetAt, meetAt + 0.35) * (1 - ramp(t, 2.6, 2.9));
+  const handAlpha = 1 - 0.6 * shutdown;
+  const tilt = 0.12 + 0.25 * close;   // knuckles lean in towards each other
+  hand(context, pose, { x: w * 0.5 - gap, y, size, roll: tilt, physical: 'left' }, { scale: s, alpha: handAlpha });
+  hand(context, pose, { x: w * 0.5 + gap, y, size, roll: -tilt, physical: 'right' }, { scale: s, alpha: handAlpha });
+
+  // the bump: a flash and a flat ring
+  const bump = t - meetAt;
+  if (bump > 0 && bump < 0.5) {
+    const fade = 1 - bump / 0.5;
+    glowDot(context, w * 0.5, y - size * 0.2, 14 * s, WHITE, fade);
+    context.save();
+    context.globalCompositeOperation = 'lighter';
+    context.strokeStyle = `rgba(${CYAN}, ${0.8 * fade})`;
+    context.lineWidth = 1 * s;
+    context.beginPath();
+    context.ellipse(w * 0.5, y - size * 0.2, w * 0.32 * (1 - fade) + 4 * s, h * 0.08 * (1 - fade) + 2 * s, 0, 0, Math.PI * 2);
+    context.stroke();
+    context.restore();
+  }
+  // END OF LINE, typed and flickering like a dying terminal
+  if (shutdown <= 0) return;
+  const text = 'END OF LINE';
+  const shown = text.slice(0, Math.ceil(text.length * ramp(t, meetAt + 0.15, meetAt + 0.6)));
+  const frame = Math.floor(t * 24);
+  const flicker = t < meetAt + 0.9 || t > 2.45 ? (hash(frame, 5) > 0.35 ? 1 : 0.25) : 1;
+  context.save();
+  context.globalCompositeOperation = 'lighter';
+  context.font = `500 ${Math.round(h * 0.11)}px ui-monospace, SFMono-Regular, Menlo, monospace`;
+  context.textAlign = 'center';
+  context.textBaseline = 'middle';
+  context.shadowColor = `rgba(${CYAN}, 0.9)`;
+  context.shadowBlur = 6 * s;
+  context.fillStyle = `rgba(${WHITE}, ${shutdown * flicker})`;
+  context.fillText(shown, w * 0.5, h * 0.2);
+  context.restore();
+}
+
 function thumbsUpScene(context, t, w, h, s) {
   const turn = ramp(t, 0.1, 0.55) * (1 - ramp(t, 3.0, 3.45));
   const pose = blendPoses(POSES.fist, THUMBS_UP, turn);
@@ -324,26 +386,37 @@ function thumbsUpScene(context, t, w, h, s) {
   const headX = startX + w * (age * age * 0.6 + age * 0.55);
   const tailX = Math.max(startX, headX - w * 0.55);
   const fade = 1 - ramp(t, 2.4, 2.9);
-  drawLightLine(context, [{ x: tailX, y: laneY }, { x: Math.min(headX, w + 20 * s), y: laneY }], BLUE, fade, s);
+  // its wall: a ribbon of glass standing on the lane, fading out towards the tail
+  const wall = h * 0.11;
+  const wallEnd = Math.min(headX - 12 * s, w + 20 * s);
+  if (wallEnd > tailX) {
+    drawRibbon(context, [{ x: tailX, y: laneY - wall }, { x: wallEnd, y: laneY - wall }],
+      { height: wall, alpha: fade, body: 0.5, s, tail: { from: tailX - (wallEnd - tailX) * 0.15, to: wallEnd } });
+  }
   if (headX > w + 10 * s) return;
-  // the cycle: a low white-hot body over two wheel rings
+  drawCycle(context, headX, laneY, fade, s);
+  glowDot(context, headX, laneY, 11 * s, CYAN, 0.8 * fade);
+}
+
+// A light cycle, nose at (x, y) on its lane: a low white-hot body over two
+// wheel rings.
+function drawCycle(context, x, y, alpha, s) {
   context.save();
   context.globalCompositeOperation = 'lighter';
-  context.strokeStyle = `rgba(${WHITE}, ${fade})`;
+  context.strokeStyle = `rgba(${WHITE}, ${alpha})`;
   context.lineWidth = 1.2 * s;
   const length = 15 * s;
   context.beginPath();
-  context.moveTo(headX - length, laneY - 3.2 * s);
-  context.lineTo(headX + 1.5 * s, laneY - 3.2 * s);
-  context.lineTo(headX + 4.5 * s, laneY);
+  context.moveTo(x - length, y - 3.2 * s);
+  context.lineTo(x + 1.5 * s, y - 3.2 * s);
+  context.lineTo(x + 4.5 * s, y);
   context.stroke();
-  for (const wheel of [headX - length + 3 * s, headX - 1.5 * s]) {
+  for (const wheel of [x - length + 3 * s, x - 1.5 * s]) {
     context.beginPath();
-    context.arc(wheel, laneY, 2.6 * s, 0, Math.PI * 2);
+    context.arc(wheel, y, 2.6 * s, 0, Math.PI * 2);
     context.stroke();
   }
   context.restore();
-  glowDot(context, headX, laneY, 11 * s, CYAN, 0.8 * fade);
 }
 
 // Voxels for the fist's derezz: fixed pseudo-random directions per joint.
@@ -530,53 +603,68 @@ function peaceScene(context, t, w, h, s) {
 }
 
 function shakaScene(context, t, w, h, s) {
-  const size = h * 0.27;
-  const toShaka = ramp(t, 0.05, 0.4) * (1 - ramp(t, 3.25, 3.55));
-  const pose = blendPoses(POSES.open, POSES.shaka, toShaka);
-  const place = (time) => ({ x: w * 0.5, y: h * 0.66, size, roll: 0.2 + 0.6 * Math.sin((time - 0.7) * 3.4) * ramp(time, 0.6, 0.9) });
-  // the baton runs through the hand, along the line from thumb tip to pinky tip
-  const baton = (points, length) => {
-    const dx = points[20].x - points[4].x;
-    const dy = points[20].y - points[4].y;
-    const norm = Math.hypot(dx, dy) || 1;
-    const cx = (points[4].x + points[20].x) / 2;
-    const cy = (points[4].y + points[20].y) / 2;
-    return [
-      { x: cx - (dx / norm) * length, y: cy - (dy / norm) * length },
-      { x: cx + (dx / norm) * length, y: cy + (dy / norm) * length },
-    ];
-  };
-  const lit = ramp(t, 0.4, 0.65) * (1 - ramp(t, 2.95, 3.2));
-  const length = h * 0.5 * lit;
-  if (lit > 0) {
-    // the swing leaves a fading arc of earlier positions
-    for (let back = 4; back >= 1; back--) {
-      const earlier = handPoints(pose, place(t - back * 0.035));
-      drawLightLine(context, baton(earlier, length), BLUE, 0.12 * (5 - back) * lit, s * 0.8);
-    }
+  const size = h * 0.22;
+  const y = h * 0.62;
+  const show = ramp(t, 0.05, 0.35) * (1 - ramp(t, 3.25, 3.55));
+  const shaka = blendPoses(POSES.open, POSES.shaka, show);
+  const grip = blendPoses(POSES.open, POSES.fist, ramp(t, 1.0, 1.3) * (1 - ramp(t, 3.2, 3.5)));
+  const lit = ramp(t, 0.35, 0.6) * (1 - ramp(t, 3.0, 3.3));
+  const arrive = ramp(t, 0.6, 1.1) * (1 - ramp(t, 3.0, 3.4));
+  const pull = ramp(t, 1.45, 2.05) * (1 - ramp(t, 2.95, 3.35));
+  const spread = w * 0.11 * pull;
+
+  // the baton hand on the left; the baton runs along its thumb-to-pinky line
+  const left = hand(context, shaka, { x: w * 0.25 - spread, y, size, roll: 0.45, physical: 'right' }, { scale: s });
+  const anchor = { x: (left[4].x + left[20].x) / 2, y: (left[4].y + left[20].y) / 2 };
+  const angle = Math.atan2(left[20].y - left[4].y, left[20].x - left[4].x);
+  const length = w * 0.42;
+  const along = (distance) => ({ x: anchor.x + Math.cos(angle) * distance, y: anchor.y + Math.sin(angle) * distance });
+  const far = along(length);
+
+  // the other hand closes round the far end, then both pull apart
+  if (arrive > 0) {
+    const grab = { x: far.x + w * 0.25 * (1 - arrive) + spread * 2, y: far.y };
+    hand(context, grip, { x: grab.x + size * 0.15, y: grab.y + size * 0.55, size, roll: -0.4, physical: 'left' },
+      { scale: s, alpha: arrive });
   }
-  const points = hand(context, pose, place(t), { scale: s });
-  if (lit > 0) {
-    drawLightLine(context, baton(points, length), CYAN, lit, s * 1.3);
-    for (const end of baton(points, length)) glowDot(context, end.x, end.y, 6 * s, CYAN, 0.6 * lit);
+  if (lit <= 0) return;
+  if (pull <= 0) {
+    drawLightLine(context, [anchor, far], CYAN, lit, s * 1.2);
+    glowDot(context, far.x, far.y, 6 * s, CYAN, 0.6 * lit);
+    return;
   }
+  // two halves, one in each hand, with the gap between them growing
+  const half = length / 2;
+  const leftEnd = along(half);
+  const rightStart = { x: leftEnd.x + spread * 2, y: leftEnd.y };
+  const rightEnd = { x: far.x + spread * 2, y: far.y };
+  drawLightLine(context, [anchor, leftEnd], CYAN, lit, s * 1.2);
+  drawLightLine(context, [rightStart, rightEnd], CYAN, lit, s * 1.2);
+  for (const end of [leftEnd, rightStart]) glowDot(context, end.x, end.y, 6 * s, WHITE, 0.8 * lit * pull);
+  // a light cycle rezzes in the gap
+  const rez = ramp(t, 1.85, 2.3) * (1 - ramp(t, 2.95, 3.25));
+  if (rez <= 0) return;
+  const cycle = { x: (leftEnd.x + rightStart.x) / 2 + 7 * s, y: h * 0.86 };
+  if (t < 2.25) glowDot(context, cycle.x - 5 * s, cycle.y, 14 * s, WHITE, Math.sin(Math.PI * ramp(t, 1.85, 2.25)));
+  drawCycle(context, cycle.x, cycle.y, rez, s);
 }
 
 export const CONTROLS = [
   { id: 'point', name: 'Point', action: 'Draw a light wall', detail: 'Index finger only', scene: pointScene },
   { id: 'rock', name: 'Rock', action: 'Switch colour', detail: 'Index and pinky · cyan / orange, per hand',
     scene: rockScene },
-  { id: 'ok', name: 'OK sign', action: 'Identity disc', detail: 'The disc rezzes in that hand', scene: okScene },
-  { id: 'flick', name: 'Flick', action: 'Throw the disc', detail: 'Flick the disc hand. It ricochets and comes back',
-    scene: flickScene },
+  { id: 'ok', name: 'OK sign', action: 'Identity disc',
+    detail: 'Flick your hand to throw it; it bounces off walls and discs', scene: okScene },
+  { id: 'twoFists', name: 'Two fists', action: 'End of line', detail: 'Shuts the whole Grid down and reboots it',
+    scene: twoFistsScene },
   { id: 'thumbsUp', name: 'Thumbs up', action: 'Launch a light cycle', detail: 'It rides out from your hand',
     scene: thumbsUpScene },
-  { id: 'fist', name: 'Fist', action: 'Derezz', detail: 'A wave that breaks everything into voxels',
-    scene: fistScene },
+  { id: 'fist', name: 'Hold a fist', action: 'Derezz',
+    detail: 'Hold it for a moment to break everything around your hand', scene: fistScene },
   { id: 'peace', name: 'Peace sign', action: 'Digitize yourself', detail: 'A laser sweep turns your outline into light',
     scene: peaceScene },
   { id: 'shaka', name: 'Shaka', action: 'Light baton',
-    detail: 'Swing it to cut walls and bat discs; pull two apart for a light cycle', scene: shakaScene },
+    detail: 'Grab the other end with your other hand and pull apart to rezz a light cycle', scene: shakaScene },
   { id: 'palms', name: 'Both palms open', action: 'Open a portal', detail: 'Palms toward the camera',
     scene: portalScene },
 ];

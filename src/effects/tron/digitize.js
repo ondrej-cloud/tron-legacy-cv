@@ -18,7 +18,7 @@ import { HAND_CONNECTIONS } from '../../hands.js';
 import { createSegmenter, coverTransform } from '../../segmentation.js';
 import { additiveMaterial } from './gl.js';
 import { createLines } from './lines.js';
-import { GRADE, cssFilter, gradeMatrices, gradeChunk, cssEase } from './grade.js';
+import { GRADE, gradeMatrices, gradeChunk, cssEase } from './grade.js';
 import { smoothstep } from './filters.js';
 
 export const DIGITIZE = {
@@ -343,8 +343,16 @@ export function createDigitizer({ hands, view, voxels, flashes, log }) {
     get segmenterRuns() {
       return segmenter.runs;
     },
-    cameraFilter() {
-      return cssFilter(filter.to);
+    // the camera brightness it asks for
+    get brightness() {
+      return filter.to;
+    },
+    // stop at once (the Grid shuts down): the camera is left to whoever dims it next
+    cancel() {
+      if (!sequence) return;
+      sequence = null;
+      filter.from = filter.to = GRADE.brightness;
+      filter.since = -Infinity;
     },
     update(seconds, dt, nowMs) {
       now = seconds;

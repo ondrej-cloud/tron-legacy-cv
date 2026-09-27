@@ -6,9 +6,10 @@
 
 I love TRON: Legacy. The Grid, the light cycles, the identity discs, the Daft Punk soundtrack: I've rewatched
 it more times than I'd like to admit, and I always wanted to throw an identity disc myself. So I built the
-next best thing. **Tron Legacy CV** turns your webcam into the Grid: you draw light walls with your finger,
-summon a disc, throw it so it ricochets off the walls you drew, swing a light baton, launch light cycles,
-derezz everything with a fist and get digitized by the laser, all with hand gestures, live in the browser.
+next best thing. **Tron Legacy CV** turns your webcam into the Grid: you draw glass light walls with your
+finger, summon a disc and throw it so it ricochets off the walls you drew, pull a baton apart into a light
+cycle, get digitized by the laser and shut the whole Grid down with two fists, all with hand gestures, live
+in the browser.
 
 It's a computer vision project at heart: MediaPipe tracks 21 landmarks on each hand, and everything you see is
 driven by a gesture recognizer I built on top of those landmarks. It runs entirely in your browser. Nothing
@@ -16,16 +17,19 @@ is uploaded anywhere.
 
 **▶ Live demo:** https://tron-legacy-cv.vercel.app (allow the camera, or watch the scripted demo without one)
 
-- **Nine gestures, two hands**: point, rock, OK, flick, thumbs up, fist, peace, shaka and both open palms
-  together. Each hand plays independently and has its own team colour, TRON cyan or CLU orange.
+- **Nine gestures, two hands**: point, rock, OK (and a flick to throw), thumbs up, a held fist, two fists
+  together, peace, shaka and both open palms. Each hand plays independently and has its own team colour,
+  TRON cyan or CLU orange.
 - **Finger-level gesture recognition**: per-finger joint angles, thumb-to-fingertip contacts with
   hysteresis, palm orientation and handedness, all measured relative to palm size, so it works at any
   distance from the camera.
+- **Gestures that are hard to trigger by accident**: destructive ones have to be held, with a charging ring,
+  so passing through a fist while changing gestures doesn't erase anything.
 - **Person segmentation**: the digitizing laser finds your silhouette with MediaPipe's selfie segmenter and
   turns *you* into light.
-- **Physics you can play with**: discs ricochet off the walls you drew and off each other.
+- **Physics you can play with**: discs ricochet off the curved walls you drew, off batons and off each other.
 - **Live tuning panel** (press `G`): every threshold of the recognizer on a slider, with the raw
-  measurements of each finger next to it.
+  measurements of each finger and the tracker's pace next to it.
 - **Works without a camera**: a scripted demo runs through every gesture with procedural hands that go
   through the exact same recognition pipeline.
 
@@ -33,36 +37,41 @@ is uploaded anywhere.
 
 | Gesture | What happens |
 | --- | --- |
-| ☝️ **Point** (index finger only) | Draws a light wall behind your fingertip, like a light cycle: straight runs and 90° turns |
+| ☝️ **Point** (index finger only) | Draws a smooth glass light wall behind your fingertip, like a light cycle's jetwall |
 | 🤘 **Rock** (index + pinky) | Switches that hand's colour between TRON cyan and CLU orange |
 | 👌 **OK** | Summons an identity disc into that hand |
-| **Flick** while holding a disc | Throws it. It ricochets off the screen edges, your walls and the other disc, then comes back |
-| 👍 **Thumbs up** | Launches a light cycle that drops onto the Grid and races across it |
-| ✊ **Fist** | Derezz: walls, discs and cycles shatter into voxels |
+| **Flick** while holding a disc | Throws it. It ricochets off the screen edges, your walls, batons and the other disc, then comes back |
+| 👍 **Thumbs up** | Rezzes a light cycle that drops onto the Grid and rides off, leaving its own glass wall |
+| ✊ **Hold a fist** | A ring charges for half a second, then everything around that hand derezzes into voxels |
+| ✊✊ **Two fists together** | END OF LINE: the whole Grid derezzes and shuts down, then reboots |
 | ✌️ **Peace** | The digitizing laser sweeps over you and turns your outline into light |
-| 🤙 **Shaka** (thumb + pinky) | A light baton in your hand: swing it to cut walls and bat discs away. Pull two batons apart and they rezz a light cycle |
+| 🤙 **Shaka** (thumb + pinky) | A light baton in your hand: swing it to cut walls and bat discs away. Grab its other end with your other hand and pull apart, and it splits into two handles and rezzes a light cycle |
 | 🖐️🖐️ **Both palms open**, facing the camera | Opens a portal of light between your hands and lights up the Grid |
 
 <table>
   <tr>
-    <td width="50%"><img src="media/light-walls.jpg" alt="Two light walls drawn with index fingers, one cyan and one orange"><br><b>Point:</b> light walls, and <b>rock</b> switching the right hand to CLU orange</td>
+    <td width="50%"><img src="media/light-walls.jpg" alt="Two smooth glass light walls drawn with index fingers, one cyan and one orange"><br><b>Point:</b> glass light walls, and <b>rock</b> switching the right hand to CLU orange</td>
     <td width="50%"><img src="media/disc.jpg" alt="An orange identity disc held in the right hand"><br><b>OK:</b> an identity disc, ready to throw</td>
   </tr>
   <tr>
-    <td><img src="media/ricochet.jpg" alt="A thrown disc hitting a cyan light wall with a spark"><br><b>Flick:</b> the disc ricochets off a wall I drew</td>
-    <td><img src="media/disc-clash.jpg" alt="A cyan and an orange disc colliding in mid-air"><br>Two discs, two colours, one collision</td>
+    <td><img src="media/ricochet.jpg" alt="A thrown orange disc flying along a curved light wall"><br><b>Flick:</b> the disc ricochets off the walls I drew</td>
+    <td><img src="media/disc-clash.jpg" alt="A cyan and an orange disc flying towards each other"><br>Two discs, two colours, about to collide</td>
   </tr>
   <tr>
-    <td><img src="media/derezz.jpg" alt="A fist sending out a derezz wave that shatters a wall into voxels"><br><b>Fist:</b> derezz</td>
-    <td><img src="media/light-cycles.jpg" alt="A cyan and an orange light cycle racing across the Grid"><br><b>Thumbs up:</b> light cycles on the Grid</td>
+    <td><img src="media/derezz.jpg" alt="A held fist with a charging ring derezzing the nearby part of a wall into voxels"><br><b>Hold a fist:</b> a local derezz</td>
+    <td><img src="media/end-of-line.jpg" alt="END OF LINE typed in the centre while everything derezzes into voxels"><br><b>Two fists:</b> END OF LINE</td>
+  </tr>
+  <tr>
+    <td><img src="media/light-cycles.jpg" alt="A cyan and an orange light cycle riding on the Grid"><br><b>Thumbs up:</b> light cycles on the Grid</td>
+    <td><img src="media/digitize.jpg" alt="The digitizing laser turning a person's silhouette into an orange grid of light"><br><b>Peace:</b> the digitizing laser (here on a synthetic test video)</td>
   </tr>
   <tr>
     <td><img src="media/baton.jpg" alt="An orange light baton swung through a light wall, leaving a glowing arc"><br><b>Shaka:</b> a light baton cutting through a wall</td>
-    <td><img src="media/baton-cycle.jpg" alt="A light cycle rezzing between two hands that held batons"><br>Two batons pulled apart rezz a light cycle</td>
+    <td><img src="media/baton-split.jpg" alt="The other hand pulling the baton apart into two handles as the wheel rings of a cycle bloom between them"><br>Grab the other end and pull: the baton splits</td>
   </tr>
   <tr>
-    <td><img src="media/digitize.jpg" alt="The digitizing laser turning a person's silhouette into an orange grid of light"><br><b>Peace:</b> the digitizing laser (here on a synthetic test video)</td>
-    <td><img src="media/intro.jpg" alt="The intro screen with the controls listed next to animated hand glyphs"><br>The intro, with the controls</td>
+    <td><img src="media/baton-cycle.jpg" alt="A wireframe light cycle rezzing with glowing wheel rings"><br>…and a light cycle rezzes between your hands</td>
+    <td><img src="media/intro.jpg" alt="The intro screen with the nine controls listed next to animated hand glyphs"><br>The intro, with the controls</td>
   </tr>
 </table>
 
@@ -80,11 +89,12 @@ flowchart LR
     G --> H[Screen-blended<br/>over the camera]
 ```
 
-1. **Tracking** (`src/hands.js`, `src/tracker-worker.js`): MediaPipe's Hand Landmarker runs in a Web Worker
-   (GPU delegate, CPU fallback). Each new webcam frame goes over as an `ImageBitmap`, one frame in flight at a
-   time, and 21 landmarks per hand come back. Loading the model and warming up its shaders stalls for over half
-   a second, and in the worker that never freezes the animation. Browsers without module-worker support fall
-   back to the main thread.
+1. **Tracking** (`src/hands.js`): MediaPipe's Hand Landmarker runs on every new webcam frame (GPU delegate, CPU
+   fallback) and returns 21 landmarks per hand. Loading the model and warming up its shaders freezes the page for
+   over half a second, so the intro holds a still screen until the first detection is done. A Web Worker version
+   (`src/tracker-worker.js`, `?tracker=worker`) keeps even that off the main thread, but in Chrome the copied
+   frames made tracking drop hands that were in plain view, so it's opt-in. A hand also survives a few missed
+   frames (the window stretches with the tracker's actual pace) instead of blinking out and re-firing its gesture.
 2. **Hand space**: the landmarks are mirrored to match the selfie view, mapped through the `object-fit: cover`
    crop of the full-screen video, and scaled so x, y and z share one unit. Every measurement is then divided
    by the palm length (wrist to middle knuckle), so a gesture reads the same close to the camera and far from it.
@@ -100,7 +110,10 @@ flowchart LR
    only means something once you know which hand it is. With two hands in view, the left one on screen is the
    left hand, and those frames also teach the app whether MediaPipe's own handedness labels need swapping.
 7. **Gestures and events**: the classified gesture has to hold for 90 ms before it takes over, and the app emits
-   one-frame events (gesture changed, thumb tap, pinch closed/opened) that the effects react to.
+   one-frame events (gesture changed, thumb tap, pinch closed/opened) that the effects react to. On top of that,
+   each action has its own timing: a fist only derezzes after being held for half a second (you pass through a
+   fist all the time when switching gestures), END OF LINE needs both fists close together, and the baton only
+   splits once the second hand has grabbed its end and the hands have pulled apart past a threshold.
 8. **Segmentation**: for the digitizing laser, MediaPipe's selfie segmenter produces a person mask, but only while
    the effect runs. A shader turns the mask's edge into the glowing outline.
 9. **Rendering**: Three.js draws everything on black with bloom, and the layer is composited over the camera with
@@ -135,7 +148,7 @@ On macOS you can also double-click `Start.command`.
 | `D` | scripted demo on/off |
 | `M` / `C` | mouse / camera input |
 
-URL options: `?skipintro`, `?demo`, `?tune`, `?clean` (start with the UI hidden).
+URL options: `?skipintro`, `?demo`, `?tune`, `?clean` (start with the UI hidden), `?tracker=worker`.
 
 ### Tests and screenshots
 
@@ -156,13 +169,14 @@ index.html              page, import map, layers (camera, effect, UI)
 src/
   main.js               host: camera background, effect loop, intro
   hands.js              tracking, hand space, handedness, events, demo/mouse input
-  tracker-worker.js     MediaPipe hand landmarker in a Web Worker
+  tracker-worker.js     the same tracker in a Web Worker (opt-in, ?tracker=worker)
   gestures.js           finger analysis, gesture classifier, thresholds, procedural hand
   segmentation.js       selfie segmentation for the digitizing laser
   tuning.js             live tuning panel (G)
   ui.js                 status and keyboard shortcuts
   intro*.js, intro.css  camera gate, boot sequence, controls, entering the Grid
-  effects/tron/         walls, discs, baton, cycles, voxels, portal, Grid, HUD, digitize, demo
+  effects/tron/         glass walls, discs, baton, cycles, voxels, portal, Grid, HUD, digitize,
+                        END OF LINE, demo
 tools/
   test-gestures.mjs     recognition tests
   shot.mjs              headless screenshots

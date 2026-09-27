@@ -9,13 +9,18 @@
 //   thumbs up                 launch a light cycle onto the Grid floor
 //   peace                     the digitizing laser: the person turns into TRON lines
 //   shaka (thumb + pinky)     a light baton in the hand: swing it to cut walls and bat
-//                             discs; two batons joined end to end, then pulled apart,
-//                             rez a light cycle
-//   fist                      derezz wave from the fist: walls, cycles and your own disc
+//                             discs; take its free end with the other hand and pull
+//                             the hands apart to rez a light cycle
+//   fist, held                a charging ring, then a derezz wave around the fist:
+//                             nearby walls, discs, batons and cycles break into voxels
+//   both fists held together  END OF LINE: everything derezzes, the Grid shuts down
+//                             and reboots
 //   both palms open, facing   portal between the hands (not while you have a disc out)
 //
 // Real tracking jitters, so every action needs its pose to hold for a moment
 // on top of the tracker's own debounce, and drawing survives short dropouts.
+// A fist has to be held for half a second, so passing through one on the
+// way between two other gestures does nothing.
 import { OneEuroFilter, PointFilter, VelocityWindow, clamp, easeTowards } from './filters.js';
 import { WALL } from './walls.js';
 import { BATON } from './baton.js';
@@ -34,19 +39,26 @@ export const CONTROLS = {
   releaseSpeed: 0.25,     // ... along the hand's motion if it moves this fast (view units/s),
   releaseMemory: 1.0,     // ... else the way it moved within this many s, else to the centre
   lostThrowWindow: 0.4,   // s: a hand lost this soon after moving fast threw its disc
-  fistHoldMs: 80,
+  fistHoldMs: 500,        // a fist charges this long before it derezzes ...
+  derezzRadius: 2.6,      // ... everything within this many palm lengths of it
   derezzSpeed: 1.25,      // view units/s, the derezz wave front
-  derezzReach: 2.3,
+  pairDistance: 1.6,      // palm lengths between two fists that count as together ...
+  pairNear: 3.0,          // ... and closer than this, single fists wait for the pair
+  pairHoldMs: 500,
+  shutdownSpeed: 1.8,     // view units/s, the END OF LINE wave
+  shutdownReach: 2.4,
   rockHoldMs: 150,
   rockCooldownMs: 600,
   thumbsUpHoldMs: 150,
   thumbsUpCooldownMs: 1200,
   shakaHoldMs: 150,
   shakaGraceMs: 150,      // a baton survives a gesture dropout this long
-  batonJoinDistance: 0.06,   // view units between the ends of two batons that join them ...
-  batonJoinHoldMs: 150,      // ... held this long
-  batonPullApart: 0.12,   // then the palms moving this much further apart rez a light cycle
-  batonCycleScale: 1.5,
+  grabReach: 1.1,         // palm lengths from the baton's free end that the other hand takes it ...
+  grabHoldMs: 150,        // ... held there this long
+  pullDistance: 1.4,      // palm lengths further apart the hands then pull to rez a cycle
+  minPull: 0.16,          // view units
+  cycleDrop: 0.08,        // view units below the palm where a thumbs-up cycle rezzes ...
+  cycleLength: 0.3,       // ... at this length on screen (view units)
   peaceHoldMs: 200,
   peaceCooldownMs: 6000,  // from one digitize to the next (one lasts 5 s)
   portalHoldMs: 150,
@@ -59,7 +71,8 @@ export const CONTROLS = {
 const PALM_POINTS = [0, 5, 9, 13, 17];
 
 // `log(name)` records an action for the stats.
-export function createControls({ hands, view, teams, walls, discs, cycles, batons, digitizer, voxels, flashes, stage, log }) {
+export function createControls({ hands, view, teams, walls, discs, cycles, batons, digitizer, endOfLine,
+  voxels, flashes, stage, log }) {
   const states = { left: createHandState('left'), right: createHandState('right') };
   const discHands = { left: discHand(), right: discHand() };
   const waves = [];
@@ -69,7 +82,10 @@ export function createControls({ hands, view, teams, walls, discs, cycles, baton
   };
   const tethers = [{ x: 0, y: 0, strength: 0 }, { x: 0, y: 0, strength: 0 }];
   const counts = { derezz: 0, teamSwitches: 0, batonCycles: 0 };
-  const join = { linked: false, touchSinceMs: 0, palmDistance: 0, point: { x: 0, y: 0 } };
+  // the other hand taking a baton: { holder, grabber, side, sinceMs, latched, startDistance, progress }
+  let grab = null;
+  // two fists together: { near, sinceMs, charge, x, y, radius }
+  const pair = { near: false, sinceMs: 0, charge: 0, x: 0, y: 0, radius: 0 };
   const initial = (id) => id[0].toUpperCase();
   let time = 0;
 
@@ -99,6 +115,7 @@ export function createControls({ hands, view, teams, walls, discs, cycles, baton
       state.motion.reset();
     }
     state.visible = true;
+    state.size = hand.size;
     state.palm.x = state.palmX.filter(palm.x, dt);
     state.palm.y = state.palmY.filter(palm.y, dt);
     state.tip.update(tip, fresh, dt);
@@ -158,7 +175,7 @@ export function createControls({ hands, view, teams, walls, discs, cycles, baton
       }
     }
     if (!state.trail) return;
-    if (pointing) walls.steer(state.trail, state.tip.position, state.tip.velocity, time, dt);
+    if (pointing) walls.steer(state.trail, state.tip.position, time, dt);
     else if (nowMs - state.lastPointMs > CONTROLS.pointGraceMs) {
       walls.finish(state.trail, time);
       state.trail = null;
@@ -212,22 +229,68 @@ export function createControls({ hands, view, teams, walls, discs, cycles, baton
     discs.throwDisc(disc, direction.x * 0.01, direction.y * 0.01);
   }
 
+  // A fist charges for half a second (the HUD shows a ring filling up),
+  // then sends a derezz wave out to a few palm lengths around it. While both
+  // hands are fists close to each other, they charge END OF LINE instead.
   function updateFist(state, hand, nowMs) {
-    if (!hand.visible || hand.gesture !== 'fist') {
-      state.fistLatched = false;
+    if (!hand.visible || hand.gesture !== 'fist' || pair.near) {
+      state.fistCharge = 0;
+      if (hand.gesture !== 'fist') state.fistLatched = false;
       return;
     }
-    if (state.fistLatched || nowMs - hand.gestureSince < CONTROLS.fistHoldMs) return;
+    if (state.fistLatched) return;
+    state.fistCharge = clamp((nowMs - hand.gestureSince) / CONTROLS.fistHoldMs, 0, 1);
+    if (state.fistCharge < 1) return;
     state.fistLatched = true;
+    state.fistCharge = 0;
     state.lastDerezz = time;
     counts.derezz++;
     log(`derezz ${initial(hand.id)}`);
     const color = teams[hand.id].color;
-    waves.push({ x: state.palm.x, y: state.palm.y, start: time });
-    stage.shock(state.palm.x, state.palm.y, color, CONTROLS.derezzSpeed, CONTROLS.derezzReach);
-    const disc = discs.ownedBy(hand.id);
-    if (disc && (disc.state === 'held' || disc.state === 'summoning')) discs.shatter(disc);
-    else flashes.spawn({ x: state.palm.x, y: state.palm.y, size: 0.1, duration: 0.45, color });
+    const reach = Math.max(0.2, CONTROLS.derezzRadius * hand.size);
+    derezzWave(state.palm, reach, CONTROLS.derezzSpeed, color);
+    flashes.spawn({ x: state.palm.x, y: state.palm.y, size: 0.1, duration: 0.45, color });
+  }
+
+  // `everything`: also what is made while the wave runs (END OF LINE);
+  // otherwise only what was there when the fist fired
+  function derezzWave(center, reach, speed, color, everything = false) {
+    waves.push({ x: center.x, y: center.y, start: time, reach, speed, bornBefore: everything ? Infinity : time });
+    stage.shock(center.x, center.y, color, speed, reach);
+  }
+
+  // Both fists, close together, held: END OF LINE.
+  function updatePair(nowMs) {
+    const left = hands.left;
+    const right = hands.right;
+    const fists = left.visible && right.visible && left.gesture === 'fist' && right.gesture === 'fist';
+    const palm = (left.size + right.size) / 2;
+    const distance = Math.hypot(states.right.palm.x - states.left.palm.x, states.right.palm.y - states.left.palm.y);
+    pair.near = fists && distance < CONTROLS.pairNear * palm;
+    const together = fists && distance < CONTROLS.pairDistance * palm;
+    if (!together || endOfLine.active) {
+      pair.sinceMs = 0;
+      pair.charge = 0;
+      return;
+    }
+    pair.sinceMs ||= nowMs;
+    pair.x = (states.left.palm.x + states.right.palm.x) / 2;
+    pair.y = (states.left.palm.y + states.right.palm.y) / 2;
+    pair.radius = distance / 2 + palm * 0.6;
+    pair.charge = clamp((nowMs - pair.sinceMs) / CONTROLS.pairHoldMs, 0, 1);
+    if (pair.charge < 1) return;
+    pair.charge = 0;
+    pair.sinceMs = Infinity;   // once per pair of fists
+    endOfLine.start(pair);
+    digitizer.cancel();
+    for (const id of ['left', 'right']) {
+      if (states[id].trail) walls.finish(states[id].trail, time);
+      states[id].trail = null;
+      states[id].fistLatched = true;
+    }
+    grab = null;
+    derezzWave(pair, CONTROLS.shutdownReach, CONTROLS.shutdownSpeed, teams.left.color, true);
+    flashes.spawn({ x: pair.x, y: pair.y, size: 0.2, duration: 0.7, color: teams.left.color, glint: 1.4 });
   }
 
   // A one-shot gesture: fires once when `gesture` has been held for `holdMs`,
@@ -260,7 +323,8 @@ export function createControls({ hands, view, teams, walls, discs, cycles, baton
   function updateThumbsUp(state, hand, nowMs) {
     if (!heldOnce(state, hand, nowMs, 'thumbsUp', CONTROLS.thumbsUpHoldMs, CONTROLS.thumbsUpCooldownMs)) return;
     state.lastLaunch = time;
-    cycles.launch(hand.id, state.palm, teams[hand.id]);
+    cycles.launch(hand.id, { x: state.palm.x, y: state.palm.y - CONTROLS.cycleDrop }, teams[hand.id],
+      { length: CONTROLS.cycleLength });
   }
 
   // the laser emitter appears just above the raised index and middle fingers
@@ -274,7 +338,7 @@ export function createControls({ hands, view, teams, walls, discs, cycles, baton
 
   // A shaka holds a baton along the thumb-tip to pinky-tip axis, centred on
   // the palm and reaching a little past both tips; a disc in that hand is
-  // put away. After two batons became a cycle, the shaka has to be released
+  // put away. After a baton became a cycle, the shaka has to be released
   // before it rezzes a new one.
   function updateBaton(state, hand, nowMs) {
     const shaka = hand.visible && hand.gesture === 'shaka';
@@ -296,69 +360,83 @@ export function createControls({ hands, view, teams, walls, discs, cycles, baton
     }
   }
 
-  // Two batons touching end to end link up; pulling the hands apart then
-  // rezzes a light cycle from them, like Sam's. It takes the colour of the
-  // baton that was there first, with the other's colour on its wheels.
-  function updateBatonJoin(nowMs) {
-    const left = batons.get('left');
-    const right = batons.get('right');
-    if (!left || !right || left.state !== 'held' || right.state !== 'held') {
-      join.linked = false;
-      join.touchSinceMs = 0;
-      batons.linked = false;
+  // The other hand (any pose but a fist) at a baton's free end takes it;
+  // pulling the hands apart then fills the bar along the baton, and at the
+  // end the baton splits into its two handles and a light cycle rezzes
+  // between the hands, about as long as they are apart. It is the colour of
+  // the hand that held the baton, with the other hand's colour on its wheels.
+  function updateGrab(nowMs) {
+    if (grab && !grabStillValid()) {
+      batons.setGrab(grab.holder, null);
+      grab = null;
+    }
+    if (!grab) {
+      grab = findGrab(nowMs);
       return;
     }
-    const palmDistance = Math.hypot(states.right.palm.x - states.left.palm.x, states.right.palm.y - states.left.palm.y);
-    if (!join.linked) {
-      let closest = null;
-      for (const a of [left.current.a, left.current.b]) {
-        for (const b of [right.current.a, right.current.b]) {
-          const distance = Math.hypot(a.x - b.x, a.y - b.y);
-          if (!closest || distance < closest.distance) closest = { distance, x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-        }
-      }
-      if (closest.distance > CONTROLS.batonJoinDistance) {
-        join.touchSinceMs = 0;
+    const holder = states[grab.holder];
+    const grabber = states[grab.grabber];
+    const distance = Math.hypot(grabber.palm.x - holder.palm.x, grabber.palm.y - holder.palm.y);
+    if (!grab.latched) {
+      if (nearFreeEnd(grab.holder, grab.grabber) === null) {
+        grab = null;
         return;
       }
-      join.touchSinceMs ||= nowMs;
-      if (nowMs - join.touchSinceMs < CONTROLS.batonJoinHoldMs) return;
-      join.linked = true;
-      join.point = { x: closest.x, y: closest.y };
-      join.palmDistance = palmDistance;
-      batons.linked = true;
-      log('batons linked');
-      flashes.spawn({ x: closest.x, y: closest.y, size: 0.12, duration: 0.5, color: left.color, glint: 1.2 });
-      return;
+      if (nowMs - grab.sinceMs < CONTROLS.grabHoldMs) return;
+      grab.latched = true;
+      grab.startDistance = distance;
+      log(`grab ${initial(grab.grabber)}`);
     }
-    // while linked, the joint follows the hands
-    join.point = {
-      x: (states.left.palm.x + states.right.palm.x) / 2,
-      y: (states.left.palm.y + states.right.palm.y) / 2,
-    };
-    if (palmDistance - join.palmDistance < CONTROLS.batonPullApart) return;
-    const [first, second] = left.born <= right.born ? [left, right] : [right, left];
-    const firstTeam = teams[first.id];
-    const secondTeam = teams[second.id];
-    cycles.launch('both', join.point, firstTeam, {
-      scale: CONTROLS.batonCycleScale,
-      accent: secondTeam.index !== firstTeam.index ? secondTeam.color : null,
+    const palm = (hands[grab.holder].size + hands[grab.grabber].size) / 2;
+    const needed = Math.max(CONTROLS.minPull, CONTROLS.pullDistance * palm);
+    grab.progress = clamp((distance - grab.startDistance) / needed, 0, 1);
+    batons.setGrab(grab.holder, { side: grab.side, progress: grab.progress });
+    if (grab.progress < 1) return;
+    const holderTeam = teams[grab.holder];
+    const grabberTeam = teams[grab.grabber];
+    const middle = { x: (holder.palm.x + grabber.palm.x) / 2, y: (holder.palm.y + grabber.palm.y) / 2 };
+    batons.split(grab.holder, grab.side, { holder: grab.holder, grabber: grab.grabber });
+    cycles.launch('both', middle, holderTeam, {
+      length: distance * 0.9,
+      accent: grabberTeam.index !== holderTeam.index ? grabberTeam.color : null,
     });
-    batons.consume('left');
-    batons.consume('right');
-    batons.linked = false;
-    join.linked = false;
-    join.touchSinceMs = 0;
-    states.left.batonSpent = true;
-    states.right.batonSpent = true;
-    states.left.lastLaunch = time;
-    states.right.lastLaunch = time;
+    holder.batonSpent = true;
+    holder.lastLaunch = time;
+    grabber.lastLaunch = time;
     counts.batonCycles++;
+    grab = null;
+  }
+
+  function grabStillValid() {
+    const baton = batons.get(grab.holder);
+    const grabber = hands[grab.grabber];
+    return baton && baton.state === 'held' && grabber.visible && grabber.gesture !== 'fist';
+  }
+
+  // which end of the holder's baton the grabber's palm is at: +1 / -1, or null
+  function nearFreeEnd(holderId, grabberId) {
+    const baton = batons.get(holderId);
+    const grabber = hands[grabberId];
+    if (!baton || baton.state !== 'held' || !grabber.visible || grabber.gesture === 'fist') return null;
+    const palm = states[grabberId].palm;
+    const reach = CONTROLS.grabReach * grabber.size;
+    for (const [side, end] of [[1, baton.current.b], [-1, baton.current.a]]) {
+      if (Math.hypot(palm.x - end.x, palm.y - end.y) < reach) return side;
+    }
+    return null;
+  }
+
+  function findGrab(nowMs) {
+    for (const [holder, grabber] of [['left', 'right'], ['right', 'left']]) {
+      const side = nearFreeEnd(holder, grabber);
+      if (side !== null) return { holder, grabber, side, sinceMs: nowMs, latched: false, startDistance: 0, progress: 0 };
+    }
+    return null;
   }
 
   // catching a disc means opening your hands, which mustn't open the portal
   function portalReady(hand) {
-    return hand.visible && hand.palmFacing && hand.gesture !== 'ok'
+    return !endOfLine.active && hand.visible && hand.palmFacing && hand.gesture !== 'ok'
       && (hand.gesture === 'open' || hand.fingers?.count >= 4) && !discs.ownedBy(hand.id);
   }
 
@@ -428,15 +506,22 @@ export function createControls({ hands, view, teams, walls, discs, cycles, baton
   function updateWaves() {
     for (let index = waves.length - 1; index >= 0; index--) {
       const wave = waves[index];
-      const radius = (time - wave.start) * CONTROLS.derezzSpeed;
-      walls.shatter(wave, radius, wave.start, (sample, extrude) => spawnWallVoxels(sample, extrude, wave), time);
-      cycles.shatter(wave, radius, wave.start);
-      if (radius > CONTROLS.derezzReach) waves.splice(index, 1);
+      const radius = Math.min(wave.reach, (time - wave.start) * wave.speed);
+      walls.shatter(wave, radius, wave.bornBefore, (sample, extrude) => spawnWallVoxels(sample, extrude, wave), time);
+      cycles.shatter(wave, radius, wave.bornBefore);
+      discs.shatterWithin(wave, radius);
+      batons.derezzWithin(wave, radius);
+      if (radius >= wave.reach) waves.splice(index, 1);
     }
   }
 
   function describe(state, hand) {
     if (!hand.visible) return '';
+    if (endOfLine.active) return 'END OF LINE';
+    if (pair.charge > 0) return 'END OF LINE';
+    if (state.fistCharge > 0) return 'DEREZZ';
+    if (grab && grab.grabber === hand.id) return grab.latched ? 'PULL APART' : 'GRAB';
+    if (grab?.latched && grab.holder === hand.id) return 'PULL APART';
     const disc = discs.ownedBy(hand.id);
     if (digitizer.active && time - state.lastDigitize < 5) return 'DIGITIZING';
     if (time - state.lastTeamSwitch < 1.2) return `PROGRAM ${teams[hand.id].name}`;
@@ -448,7 +533,7 @@ export function createControls({ hands, view, teams, walls, discs, cycles, baton
     if (disc?.state === 'held') return 'DISC ARMED · FLICK';
     if (disc?.state === 'flying') return 'DISC THROWN';
     if (disc?.state === 'returning') return discHands[hand.id].open ? 'CATCH' : 'OPEN HAND TO CATCH';
-    if (batons.get(hand.id)) return join.linked ? 'BATONS LINKED · PULL APART' : 'BATON';
+    if (batons.get(hand.id)) return 'BATON';
     return '';
   }
 
@@ -457,22 +542,41 @@ export function createControls({ hands, view, teams, walls, discs, cycles, baton
     portal,
     tethers,
     counts,
+    pair,
+    get grab() {
+      return grab;
+    },
     update(nowMs, seconds, dt) {
       time = seconds;
       for (const hand of [hands.left, hands.right]) {
         const state = states[hand.id];
         if (hand.visible && hand.landmarks) track(state, hand, dt);
         else lose(state, hand);
-        updateDrawing(state, hand, nowMs, dt);
-        updateDisc(state, hand, nowMs);
-        updateFist(state, hand, nowMs);
-        updateRock(state, hand, nowMs);
-        updateThumbsUp(state, hand, nowMs);
-        updatePeace(state, hand, nowMs);
-        updateBaton(state, hand, nowMs);
       }
-      updateBatonJoin(nowMs);
-      batons.update(time, dt);
+      updatePair(nowMs);
+      // while the Grid is down, nothing new can be made
+      if (!endOfLine.active) {
+        for (const hand of [hands.left, hands.right]) {
+          const state = states[hand.id];
+          updateDrawing(state, hand, nowMs, dt);
+          updateDisc(state, hand, nowMs);
+          updateFist(state, hand, nowMs);
+          updateRock(state, hand, nowMs);
+          updateThumbsUp(state, hand, nowMs);
+          updatePeace(state, hand, nowMs);
+          updateBaton(state, hand, nowMs);
+        }
+        updateGrab(nowMs);
+      } else {
+        for (const id of ['left', 'right']) {
+          states[id].fistCharge = 0;
+          if (batons.get(id)) batons.release(id);
+        }
+      }
+      batons.update(time, dt, {
+        left: hands.left.visible ? states.left.palm : null,
+        right: hands.right.visible ? states.right.palm : null,
+      });
       updatePortal(nowMs, dt);
       updateWaves();
       discs.update(time, dt, discHands);
@@ -499,7 +603,9 @@ function createHandState(id) {
     openSinceMs: 0,
     trail: null,
     lastPointMs: -Infinity,
+    size: 0.13,
     fistLatched: false,
+    fistCharge: 0,
     lastDerezz: -Infinity,
     latched: {},
     lastFired: {},
