@@ -138,9 +138,10 @@ function glowDot(context, x, y, radius, color, alpha) {
 // A light wall as a ribbon of glass hanging below `points`: a bright top
 // edge, a translucent body that fades towards a faint bottom edge. The body
 // is stacked thin strokes of the same path, so it follows any curve.
-// `body` sets how much light the glass holds; `tail` = { from, to } fades the
-// ribbon in horizontally from x = from to x = to.
-function drawRibbon(context, points, { height, alpha = 1, body = 0.26, s, tail = null }) {
+// `body` sets how much light the glass holds; `lean` shifts the body left by
+// that fraction of its drop, so a vertical run still shows a strip of glass;
+// `tail` = { from, to } fades the ribbon in horizontally from x = from to x = to.
+function drawRibbon(context, points, { height, alpha = 1, body = 0.26, lean = 0, s, tail = null }) {
   if (points.length < 2 || alpha <= 0) return;
   const paint = (color, amount) => {
     if (!tail) return `rgba(${color}, ${amount})`;
@@ -150,9 +151,10 @@ function drawRibbon(context, points, { height, alpha = 1, body = 0.26, s, tail =
     return gradient;
   };
   const trace = (dy) => {
+    const dx = -dy * lean;
     context.beginPath();
-    context.moveTo(points[0].x, points[0].y + dy);
-    for (const point of points.slice(1)) context.lineTo(point.x, point.y + dy);
+    context.moveTo(points[0].x + dx, points[0].y + dy);
+    for (const point of points.slice(1)) context.lineTo(point.x + dx, point.y + dy);
   };
   context.save();
   context.globalCompositeOperation = 'lighter';
@@ -183,27 +185,54 @@ function drawRibbon(context, points, { height, alpha = 1, body = 0.26, s, tail =
   context.restore();
 }
 
+// Points along a polyline, up to a fraction of its total length.
+function partialPath(points, fraction) {
+  const lengths = [];
+  let total = 0;
+  for (let index = 1; index < points.length; index++) {
+    const length = Math.hypot(points[index].x - points[index - 1].x, points[index].y - points[index - 1].y);
+    lengths.push(length);
+    total += length;
+  }
+  let remaining = clamp01(fraction) * total;
+  const result = [points[0]];
+  for (let index = 1; index < points.length; index++) {
+    const length = lengths[index - 1];
+    if (remaining >= length) {
+      result.push(points[index]);
+      remaining -= length;
+      continue;
+    }
+    const amount = length > 0 ? remaining / length : 0;
+    result.push({
+      x: mix(points[index - 1].x, points[index].x, amount),
+      y: mix(points[index - 1].y, points[index].y, amount),
+    });
+    break;
+  }
+  return result;
+}
+
 // Each scene draws one frame of a control at loop time t (0..LOOP) on a
 // w x h canvas (device pixels); `s` scales line widths with the pixel ratio.
 
 function pointScene(context, t, w, h, s) {
   const size = h * 0.29;
-  // the fingertip draws one smooth, flowing curve of glass
-  const route = (u) => ({
-    x: w * (0.1 + 0.8 * u),
-    y: h * (0.36 + 0.11 * Math.sin(u * Math.PI * 2 - 0.5)),
-  });
+  // the fingertip draws a wall in straight runs with right-angle turns
+  const route = [
+    { x: w * 0.16, y: h * 0.5 }, { x: w * 0.46, y: h * 0.5 },
+    { x: w * 0.46, y: h * 0.24 }, { x: w * 0.88, y: h * 0.24 },
+  ];
   const drawing = ramp(t, 0.55, 2.55);
   const fade = 1 - ramp(t, 2.9, 3.45);
   const pose = blendPoses(POSES.open, POSES.point, ramp(t, 0.05, 0.45));
-  const drawn = [];
-  for (let step = 0; step <= 48; step++) drawn.push(route((step / 48) * drawing));
+  const drawn = partialPath(route, drawing);
   const tipTarget = drawn.at(-1);
-  // place the hand so that its index fingertip sits on the curve
+  // place the hand so that its index fingertip sits on the route
   const probe = handPoints(pose, { x: 0, y: 0, size, roll: 0.1 });
   const points = probe.map((point) => ({
     x: point.x + tipTarget.x - probe[8].x, y: point.y + tipTarget.y - probe[8].y, z: point.z }));
-  if (drawing > 0) drawRibbon(context, drawn, { height: h * 0.15, alpha: fade, s });
+  if (drawing > 0) drawRibbon(context, drawn, { height: h * 0.15, alpha: fade, lean: 0.45, s });
   drawHand(context, points, { pose, alpha: 0.4 + 0.6 * fade, scale: s });
   if (drawing > 0 && drawing < 1) glowDot(context, tipTarget.x, tipTarget.y, 8 * s, CYAN, 0.9);
 }

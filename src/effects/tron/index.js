@@ -172,6 +172,7 @@ export function createEffect({ container, hands }) {
         teams: `${teams.left.name}/${teams.right.name}`,
         wallLength: Number(walls.length.toFixed(2)),
         trails: walls.trailCount,
+        turns: walls.turnCount,
         voxels: voxels.alive,
         discs: discs.list.map((disc) => `${disc.owner}:${disc.state}`).join(' '),
         discCounts: { ...discs.counts },

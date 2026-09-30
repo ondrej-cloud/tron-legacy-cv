@@ -27,7 +27,7 @@ is uploaded anywhere.
   so passing through a fist while changing gestures doesn't erase anything.
 - **Person segmentation**: the digitizing laser finds your silhouette with MediaPipe's selfie segmenter and
   turns *you* into light.
-- **Physics you can play with**: discs ricochet off the curved walls you drew, off batons and off each other.
+- **Physics you can play with**: discs ricochet off the walls you drew, off batons and off each other.
 - **Live tuning panel** (press `G`): every threshold of the recognizer on a slider, with the raw
   measurements of each finger and the tracker's pace next to it.
 - **Works without a camera**: a scripted demo runs through every gesture with procedural hands that go
@@ -37,7 +37,7 @@ is uploaded anywhere.
 
 | Gesture | What happens |
 | --- | --- |
-| ☝️ **Point** (index finger only) | Draws a smooth glass light wall behind your fingertip, like a light cycle's jetwall |
+| ☝️ **Point** (index finger only) | Draws a glass light wall behind your fingertip, like a light cycle: straight runs and 90° turns |
 | 🤘 **Rock** (index + pinky) | Switches that hand's colour between TRON cyan and CLU orange |
 | 👌 **OK** | Summons an identity disc into that hand |
 | **Flick** while holding a disc | Throws it. It ricochets off the screen edges, your walls, batons and the other disc, then comes back |
@@ -50,12 +50,12 @@ is uploaded anywhere.
 
 <table>
   <tr>
-    <td width="50%"><img src="media/light-walls.jpg" alt="Two smooth glass light walls drawn with index fingers, one cyan and one orange"><br><b>Point:</b> glass light walls, and <b>rock</b> switching the right hand to CLU orange</td>
+    <td width="50%"><img src="media/light-walls.jpg" alt="Two glass light walls with 90° turns drawn with index fingers, one cyan and one orange"><br><b>Point:</b> glass light walls, and <b>rock</b> switching the right hand to CLU orange</td>
     <td width="50%"><img src="media/disc.jpg" alt="An orange identity disc held in the right hand"><br><b>OK:</b> an identity disc, ready to throw</td>
   </tr>
   <tr>
-    <td><img src="media/ricochet.jpg" alt="A thrown orange disc flying along a curved light wall"><br><b>Flick:</b> the disc ricochets off the walls I drew</td>
-    <td><img src="media/disc-clash.jpg" alt="A cyan and an orange disc flying towards each other"><br>Two discs, two colours, about to collide</td>
+    <td><img src="media/ricochet.jpg" alt="A thrown orange disc flying away from the hand while a held fist charges a derezz"><br><b>Flick:</b> the disc ricochets off the walls I drew</td>
+    <td><img src="media/disc-clash.jpg" alt="A cyan and an orange disc colliding mid-air with a two-colour burst"><br>Two discs, two colours, one collision</td>
   </tr>
   <tr>
     <td><img src="media/derezz.jpg" alt="A held fist with a charging ring derezzing the nearby part of a wall into voxels"><br><b>Hold a fist:</b> a local derezz</td>

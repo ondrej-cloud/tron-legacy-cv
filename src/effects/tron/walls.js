@@ -1,16 +1,15 @@
 // Light walls: pointing draws a light-cycle wall from the index fingertip.
 //
-// The wall follows the fingertip in smooth curves. The fingertip is already
-// filtered (controls.js); here the head of the wall hangs from it on a short
-// string (a "lazy brush"), so tracker jitter smaller than the string never
-// reaches the wall, and samples are dropped at an even spacing along the
-// head's path. Each wall is a glass ribbon (ribbon.js) extruded up and
-// slightly to the right (a wall seen from a little above), with a
-// white-hot leading edge, in the colour of the hand that draws it. Walls
-// fade after a few seconds, the oldest go first when there is too much,
-// thrown discs bounce off them (segments() and pulse()), and derezz waves
-// and light batons break them (shatterWhere()); a freshly broken end glows
-// for a moment.
+// The path only runs horizontally or vertically. The head follows the
+// fingertip along the current run and turns 90° once the fingertip has
+// clearly left that line, so tracker jitter never bends it. Each wall is a
+// glass ribbon (ribbon.js) extruded up and slightly to the right by a fixed
+// amount on screen (a wall seen from a little above), so it keeps its
+// height whichever way a run goes, with a white-hot leading edge, in the
+// colour of the hand that draws it. Walls fade after a few seconds, the
+// oldest go first when there is too much, thrown discs bounce off them
+// (segments() and pulse()), and derezz waves and light batons break them
+// (shatterWhere()); a freshly broken end glows for a moment.
 import * as THREE from 'three';
 import { additiveMaterial, quadIndices, uploadPrefix } from './gl.js';
 import { createRibbon } from './ribbon.js';
@@ -25,8 +24,14 @@ export const WALL = {
   fadeStart: 6,             // s
   fadeEnd: 8,
   hotTime: 0.45,            // the newest part stays white-hot this long
-  brushRadius: 0.01,        // view units of slack between the fingertip and the wall's head
-  headLag: 0.03,            // s, the head eases after the fingertip
+  startDistance: 0.018,     // fingertip travel that picks the first direction
+  turnOffset: 0.036,        // off-axis offset that always turns
+  quickTurnOffset: 0.016,   // a smaller offset turns if the fingertip clearly moves sideways
+  quickTurnSpeed: 0.2,      // view units/s
+  sidewaysRatio: 1.5,       // sideways speed vs speed along the run
+  minRun: 0.024,            // shortest run between two turns
+  reverseDistance: 0.05,    // backing up this far makes a U-turn
+  headLag: 0.03,            // s, the head eases onto the fingertip's projection
   solidAlpha: 0.3,          // a fading wall stops discs until it is fainter than this
   pulseSpeed: 1.1,          // view units/s, the flash running along a wall a disc hit
   pulseWidth: 0.03,
@@ -87,7 +92,7 @@ export function createLightWalls(view, teams) {
   let livingSamples = 0;
 
   const time = { value: 0 };
-  const ribbon = createRibbon(MAX_QUADS, teams.colors, time);
+  const ribbon = createRibbon(MAX_QUADS, teams.colors, time, { edgeOn: 0 });
 
   const edgePositions = new Float32Array(MAX_EDGES * 4 * 3);
   const edgeData = new Float32Array(MAX_EDGES * 4 * 4);
@@ -120,17 +125,32 @@ export function createLightWalls(view, teams) {
     return trail.samples[trail.samples.length - 1];
   }
 
-  // drops samples at an even spacing along the way to the head
-  function resample(trail, now) {
-    const { head } = trail;
+  // moves the head along the current run and drops samples behind it
+  function advance(trail, distance, now) {
+    const { head, dir } = trail;
+    head.x += dir.x * distance;
+    head.y += dir.y * distance;
     let last = lastSample(trail);
+    if (!last) {
+      pushSample(trail, head.x, head.y, now);
+      return;
+    }
     let gap = Math.hypot(head.x - last.x, head.y - last.y);
     while (gap >= WALL.spacing) {
-      const t = WALL.spacing / gap;
-      pushSample(trail, last.x + (head.x - last.x) * t, last.y + (head.y - last.y) * t, now);
+      pushSample(trail, last.x + dir.x * WALL.spacing, last.y + dir.y * WALL.spacing, now);
       last = lastSample(trail);
-      gap = Math.hypot(head.x - last.x, head.y - last.y);
+      gap -= WALL.spacing;
     }
+  }
+
+  function turn(trail, dirX, dirY, now) {
+    const last = lastSample(trail);
+    if (!last || Math.hypot(trail.head.x - last.x, trail.head.y - last.y) > 1e-4) {
+      pushSample(trail, trail.head.x, trail.head.y, now);
+    }
+    trail.dir = { x: dirX, y: dirY };
+    trail.corner = { x: trail.head.x, y: trail.head.y };
+    trail.turns++;
   }
 
   function start(tip, now, team) {
@@ -138,24 +158,67 @@ export function createLightWalls(view, teams) {
       team,
       active: true,
       head: { x: tip.x, y: tip.y },
+      corner: { x: tip.x, y: tip.y },
+      dir: null,
       samples: [],
+      turns: 0,
     };
     pushSample(trail, tip.x, tip.y, now);
     trails.push(trail);
     return trail;
   }
 
-  // tip in view units (y up); called every frame while pointing
-  function steer(trail, tip, now, dt) {
+  // tip and velocity in view units (y up); called every frame while pointing
+  function steer(trail, tip, velocity, now, dt) {
     const { head } = trail;
-    const dx = tip.x - head.x;
-    const dy = tip.y - head.y;
-    const distance = Math.hypot(dx, dy);
-    if (distance <= WALL.brushRadius) return;
-    const pull = (distance - WALL.brushRadius) * (1 - Math.exp(-dt / WALL.headLag));
-    head.x += (dx / distance) * pull;
-    head.y += (dy / distance) * pull;
-    resample(trail, now);
+    if (!trail.dir) {
+      const dx = tip.x - head.x;
+      const dy = tip.y - head.y;
+      if (Math.hypot(dx, dy) < WALL.startDistance) return;
+      trail.dir = Math.abs(dx) >= Math.abs(dy) ? { x: Math.sign(dx), y: 0 } : { x: 0, y: Math.sign(dy) };
+    }
+    const { dir } = trail;
+    const side = { x: -dir.y, y: dir.x };
+    const offsetX = tip.x - head.x;
+    const offsetY = tip.y - head.y;
+    const along = offsetX * dir.x + offsetY * dir.y;
+    const across = offsetX * side.x + offsetY * side.y;
+    const speedAlong = velocity.x * dir.x + velocity.y * dir.y;
+    const speedAcross = velocity.x * side.x + velocity.y * side.y;
+    const run = Math.abs((head.x - trail.corner.x) * dir.x + (head.y - trail.corner.y) * dir.y);
+
+    if (run < WALL.minRun) {
+      // The run has barely started. A run that hasn't moved yet may aim
+      // anywhere (a bad first guess); a short one may only double back.
+      // Without this a fingertip that reverses right away would be stuck.
+      const dominant = Math.abs(offsetX) >= Math.abs(offsetY)
+        ? { x: Math.sign(offsetX), y: 0 } : { x: 0, y: Math.sign(offsetY) };
+      const reversed = dominant.x === -dir.x && dominant.y === -dir.y;
+      const elsewhere = dominant.x !== dir.x || dominant.y !== dir.y;
+      if (Math.hypot(offsetX, offsetY) > 2 * WALL.startDistance && (run < 1e-3 ? elsewhere : reversed)) {
+        if (run < 1e-3) trail.dir = dominant;
+        else turn(trail, dominant.x, dominant.y, now);
+        return;
+      }
+    } else {
+      const movingSideways = Math.abs(across) > WALL.quickTurnOffset
+        && Math.sign(speedAcross) === Math.sign(across)
+        && Math.abs(speedAcross) > WALL.quickTurnSpeed
+        && Math.abs(speedAcross) > WALL.sidewaysRatio * Math.abs(speedAlong);
+      if (Math.abs(across) > WALL.turnOffset || movingSideways) {
+        const sign = Math.sign(across);
+        turn(trail, side.x * sign, side.y * sign, now);
+        return;
+      }
+      if (along < -WALL.reverseDistance) {
+        // a light cycle can't reverse: jog sideways, the next turn heads back
+        const sign = Math.sign(across) || 1;
+        turn(trail, side.x * sign, side.y * sign, now);
+        advance(trail, WALL.minRun, now);
+        return;
+      }
+    }
+    if (along > 0) advance(trail, along * (1 - Math.exp(-dt / WALL.headLag)), now);
   }
 
   function finish(trail, now) {
@@ -196,7 +259,10 @@ export function createLightWalls(view, teams) {
       }
       // a wall still being drawn carries on from where the head is now
       const last = lastSample(trail);
-      if (trail.active && last && last.gone) pushSample(trail, trail.head.x, trail.head.y, now);
+      if (trail.active && last && last.gone) {
+        trail.corner = { x: trail.head.x, y: trail.head.y };
+        pushSample(trail, trail.head.x, trail.head.y, now);
+      }
     }
   }
 
@@ -370,6 +436,9 @@ export function createLightWalls(view, teams) {
     },
     get trailCount() {
       return trails.length;
+    },
+    get turnCount() {
+      return trails.reduce((sum, trail) => sum + trail.turns, 0);
     },
   };
 }

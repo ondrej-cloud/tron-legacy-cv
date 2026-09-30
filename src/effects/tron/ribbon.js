@@ -28,6 +28,7 @@ const fragmentShader = /* glsl */`
   uniform vec3 uTeam[2];
   uniform float uTime;
   uniform float uBody;     // how dense the glass is
+  uniform float uEdgeOn;   // how much the viewing angle changes the look (0..1)
   varying vec4 vWall;
   varying vec2 vGlass;
   void main() {
@@ -35,7 +36,7 @@ const fragmentShader = /* glsl */`
     float alpha = vWall.y;
     float heat = vWall.z;
     float along = vGlass.x;
-    float edgeOn = vGlass.y;
+    float edgeOn = vGlass.y * uEdgeOn;
     vec3 color = mix(uTeam[0], uTeam[1], vWall.w);
     vec3 hot = mix(color, vec3(1.0), 0.8);
     float px = max(fwidth(v), 1e-4);
@@ -47,6 +48,8 @@ const fragmentShader = /* glsl */`
     // the glass's thickness: a second, fainter line just under the top
     float bevel = 1.0 - smoothstep(0.35 * px, 1.2 * px, abs(v - 1.0 + 3.5 * px));
     float base = 1.0 - smoothstep(0.4 * px, 1.3 * px, abs(v));
+    // the glass catches light along its lower edge too
+    float lowerRim = inside * exp(-v / 0.12) * 0.12;
 
     // the body: tinted glass, clear at the base and denser towards the top,
     // with long streaks that waver along the wall
@@ -66,7 +69,8 @@ const fragmentShader = /* glsl */`
       + hot * reflection
       + mix(color, hot, 0.7) * top * 1.25 + color * glow * 0.28
       + color * bevel * 0.45
-      + color * base * 0.2 * uBody;
+      + color * base * 0.2 * uBody
+      + color * lowerRim;
     // fresh or struck glass runs hot
     col += (hot * inside * 0.1 + hot * top * 0.5) * heat;
     gl_FragColor = vec4(col * alpha * folded, 1.0);
@@ -74,8 +78,10 @@ const fragmentShader = /* glsl */`
 `;
 
 // teamColors: [TRON, CLU] colours; time: a shared { value } uniform;
-// body: how dense the glass is (walls over the bright Grid floor need more)
-export function createRibbon(maxQuads, teamColors, time, { body = 1 } = {}) {
+// body: how dense the glass is (walls over the bright Grid floor need more);
+// edgeOn: how much a wall seen edge-on changes (the curving cycle walls) or
+// not at all (the drawn walls, whose runs should all read the same)
+export function createRibbon(maxQuads, teamColors, time, { body = 1, edgeOn = 1 } = {}) {
   const positions = new Float32Array(maxQuads * 4 * 3);
   const wallData = new Float32Array(maxQuads * 4 * 4);
   const glassData = new Float32Array(maxQuads * 4 * 2);
@@ -85,7 +91,7 @@ export function createRibbon(maxQuads, teamColors, time, { body = 1 } = {}) {
   geometry.setAttribute('aGlass', new THREE.BufferAttribute(glassData, 2).setUsage(THREE.DynamicDrawUsage));
   geometry.setIndex(new THREE.BufferAttribute(quadIndices(maxQuads), 1));
   const material = additiveMaterial(vertexShader, fragmentShader,
-    { uTeam: { value: teamColors }, uTime: time, uBody: { value: body } });
+    { uTeam: { value: teamColors }, uTime: time, uBody: { value: body }, uEdgeOn: { value: edgeOn } });
   const mesh = new THREE.Mesh(geometry, material);
   mesh.frustumCulled = false;
 

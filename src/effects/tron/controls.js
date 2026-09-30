@@ -175,7 +175,7 @@ export function createControls({ hands, view, teams, walls, discs, cycles, baton
       }
     }
     if (!state.trail) return;
-    if (pointing) walls.steer(state.trail, state.tip.position, time, dt);
+    if (pointing) walls.steer(state.trail, state.tip.position, state.tip.velocity, time, dt);
     else if (nowMs - state.lastPointMs > CONTROLS.pointGraceMs) {
       walls.finish(state.trail, time);
       state.trail = null;

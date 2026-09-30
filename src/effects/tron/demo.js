@@ -7,7 +7,7 @@
 //
 // Timeline (seconds into the loop; the effect needs ~0.25 s to react):
 //    0.0 -  2.6  both palms open, moving apart: portal, Grid floor lights up
-//    3.4 -  6.9  both index fingers draw smooth, curving glass walls
+//    3.4 -  6.9  both index fingers draw glass walls with 90° turns
 //          4.7   right hand makes rock mid-wall: it turns CLU orange, the rest
 //                of its wall comes out orange while the left one stays cyan
 //          7.8   right hand makes "ok": an orange identity disc (~8.3 ready)
@@ -58,33 +58,32 @@ const key = (t, x, y, pose, options = {}) => ({ t, x, y, pose, anchor: 'pinch', 
 const tip = (t, x, y, pose, options = {}) => key(t, x, y, pose, { anchor: 'tip', ...options });
 const hidden = (t) => ({ t, hidden: true });
 
-// a cubic Bezier through viewport points, for drawing
-const bezier = (p0, p1, p2, p3) => (u) => {
-  const v = 1 - u;
-  return [0, 1].map((axis) => v * v * v * p0[axis] + 3 * v * v * u * p1[axis] + 3 * v * u * u * p2[axis] + u * u * u * p3[axis]);
-};
-
-// Fingertip keyframes along a curve, pointing, at an even pace through it.
-function draw(startTime, duration, curve, steps = 24) {
+// Fingertip keyframes along a polyline at constant speed (view units/s).
+function path(startTime, speed, points, aspect = 16 / 9) {
   const keys = [];
-  for (let k = 0; k <= steps; k++) {
-    const [x, y] = curve(k / steps);
-    keys.push(tip(startTime + (duration * k) / steps, x, y, 'point', { ease: 'linear' }));
-  }
+  let time = startTime;
+  points.forEach(([x, y], index) => {
+    if (index > 0) {
+      const [previousX, previousY] = points[index - 1];
+      time += Math.hypot((x - previousX) * aspect, y - previousY) / speed;
+    }
+    keys.push(tip(time, x, y, 'point', { ease: 'linear' }));
+  });
   return keys;
 }
 
 const RIGHT = [
   key(0, 0.635, 0.62, 'open'),
   key(2.4, 0.77, 0.58, 'open'),
-  tip(2.9, 0.66, 0.82, 'open'),
-  tip(3.15, 0.66, 0.82, 'point'),
-  ...draw(3.4, 1.2, bezier([0.66, 0.82], [0.8, 0.88], [0.92, 0.76], [0.88, 0.6])),
-  tip(4.75, 0.88, 0.6, 'rock'),           // switch to CLU in the middle of the wall
-  tip(5.15, 0.88, 0.6, 'rock'),
-  tip(5.3, 0.88, 0.6, 'point'),
-  ...draw(5.45, 1.45, bezier([0.88, 0.6], [0.85, 0.38], [0.64, 0.44], [0.74, 0.2])),
-  tip(7.05, 0.74, 0.2, 'open'),
+  tip(2.9, 0.66, 0.8, 'open'),
+  tip(3.15, 0.66, 0.8, 'point'),
+  ...path(3.4, 0.5, [[0.66, 0.8], [0.78, 0.8], [0.78, 0.62], [0.88, 0.62]]),
+  tip(4.6, 0.88, 0.62, 'point'),
+  tip(4.75, 0.88, 0.62, 'rock'),          // switch to CLU in the middle of the wall
+  tip(5.15, 0.88, 0.62, 'rock'),
+  tip(5.3, 0.88, 0.62, 'point'),
+  ...path(5.45, 0.5, [[0.88, 0.62], [0.88, 0.28], [0.74, 0.28], [0.74, 0.17]]),
+  tip(7.05, 0.74, 0.17, 'open'),
   key(7.35, 0.77, 0.58, 'open'),
   key(7.6, 0.76, 0.6, 'ok'),
   key(8.55, 0.76, 0.6, 'ok'),
@@ -111,7 +110,7 @@ const RIGHT = [
   key(24.3, 0.78, 0.58, 'open'),
   tip(24.6, 0.64, 0.3, 'open'),
   tip(24.85, 0.64, 0.3, 'point'),
-  ...draw(25.05, 1.0, bezier([0.64, 0.3], [0.59, 0.45], [0.69, 0.56], [0.64, 0.72]), 16),
+  ...path(25.05, 0.5, [[0.64, 0.3], [0.64, 0.72]]),
   tip(26.1, 0.64, 0.72, 'point'),
   key(26.35, 0.8, 0.5, 'open'),
   key(26.6, 0.8, 0.5, 'shaka'),           // a baton
@@ -142,8 +141,8 @@ const LEFT = [
   key(2.4, 0.23, 0.58, 'open'),
   tip(2.9, 0.36, 0.2, 'open'),
   tip(3.15, 0.36, 0.2, 'point'),
-  ...draw(3.4, 1.7, bezier([0.36, 0.2], [0.18, 0.16], [0.07, 0.32], [0.13, 0.5])),
-  ...draw(5.1, 1.75, bezier([0.13, 0.5], [0.18, 0.68], [0.2, 0.88], [0.38, 0.82])).slice(1),
+  ...path(3.4, 0.48, [[0.36, 0.2], [0.2, 0.2], [0.2, 0.42], [0.08, 0.42], [0.08, 0.7], [0.24, 0.7]]),
+  ...path(6.07, 0.6, [[0.24, 0.7], [0.24, 0.84], [0.37, 0.84]]).slice(1),
   hidden(6.95),                           // leaves, so the open right hand doesn't open a portal
   key(9.75, 0.27, 0.64, 'fist'),          // comes back as a fist and holds it: derezz
   key(10.6, 0.27, 0.64, 'fist'),
