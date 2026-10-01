@@ -3,7 +3,7 @@
 // Effect contract (src/effects/<id>/index.js):
 //
 //   export const meta = { title, hint };
-//   export async function createEffect({ container, hands }) {
+//   export async function createEffect({ container, hands, host }) {
 //     // create your own THREE.WebGLRenderer and append its canvas to `container`
 //     return {
 //       update(nowMs, dt),     // hands.update() has already run this frame
@@ -12,9 +12,15 @@
 //       cameraFilter,          // optional CSS filter for the webcam behind this effect;
 //                              // read every frame, so a getter can animate it
 //       demoScript(t),         // optional scripted hands for demo mode (see hands.js)
+//       onEnter(),             // optional, called each time the user enters from the intro
 //       stats(),               // optional, merged into window.__stats
 //     };
 //   }
+//
+// `host.returnToIntro()` hands the screen back to the intro (it plays its
+// "returning" version, without the camera gate); the effect is paused until
+// the user enters again, then gets onEnter(). `host.music.fadeOut(seconds)`
+// fades the background music, e.g. while the Grid powers down.
 //
 // The effect layer is composited with `mix-blend-mode: screen`, so light adds
 // onto the camera image and dark areas leave it untouched. Only the active
@@ -23,6 +29,7 @@
 import { Hands } from './hands.js';
 import { createUI } from './ui.js';
 import { createTuningPanel } from './tuning.js';
+import { createMusic } from './music.js';
 import { EFFECTS } from './effects/index.js';
 
 const DEFAULT_CAMERA_FILTER = 'brightness(0.72) saturate(0.9)';
@@ -44,17 +51,38 @@ let activationToken = 0;
 
 const ui = createUI(hands);
 const tuning = createTuningPanel(hands);
+const music = createMusic();
 
 // The intro covers the screen until the user enters (demo runs skip it unless ?intro).
-if (introRunning) {
+function showIntro({ returning = false } = {}) {
+  introRunning = true;
+  music.play('intro');
   import('./intro.js')
-    .then(({ runIntro }) => runIntro({ hands, onDone: () => { introRunning = false; } }))
+    .then(({ runIntro }) => runIntro({
+      hands,
+      returning,
+      onDone: () => {
+        introRunning = false;
+        music.play('grid');
+        active?.effect.onEnter?.();
+      },
+    }))
     .catch((error) => {
       console.error('intro failed to load', error);
       introRunning = false;
       hands.start();
+      music.play('grid');
     });
 }
+if (introRunning) showIntro();
+else music.play('grid');
+
+const host = {
+  music,
+  returnToIntro() {
+    if (!introRunning) showIntro({ returning: true });
+  },
+};
 
 async function activate(id) {
   const token = ++activationToken;
@@ -68,7 +96,7 @@ async function activate(id) {
     effectLayers.appendChild(container);
     try {
       const module = await entry.load();
-      const effect = await module.createEffect({ container, hands });
+      const effect = await module.createEffect({ container, hands, host });
       slot = { id, container, effect, meta: module.meta ?? {} };
       loaded.set(id, slot);
     } catch (loadError) {

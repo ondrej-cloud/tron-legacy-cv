@@ -7,7 +7,8 @@
 // dark body with white-hot rims, drops onto the Grid and rides off in
 // smooth curves, leaving a glass wall (ribbon.js) in its hand's colour.
 // After a few seconds, or when a derezz wave reaches it, it breaks into
-// voxels and its wall fades.
+// voxels and its wall fades. When the Grid powers down, cycles stop and go
+// dark, and their walls go out stretch by stretch (powerDown()).
 //
 // Everything lives in the floor's grid space (x across, z into the frame,
 // h up; see stage.js) and is projected to the view every frame. The layer
@@ -18,6 +19,7 @@ import * as THREE from 'three';
 import { createRibbon } from './ribbon.js';
 import { createLines } from './lines.js';
 import { clamp, easeTowards, smoothstep } from './filters.js';
+import { lightPower } from './endofline.js';
 
 export const CYCLE = {
   speed: 1.3,              // floor units/s (bigger bikes ride a little faster)
@@ -166,6 +168,7 @@ export function createCycles({ view, teams, stage, voxels, flashes, log }) {
   const glow = new THREE.Color();
   let now = 0;
   let fillCount = 0;
+  let power = 1;   // the cycle being drawn: how lit it still is (the Grid powering down)
 
   const random = (range) => range[0] + Math.random() * (range[1] - range[0]);
   const window01 = (age, [start, end]) => clamp((age - start) / (end - start), 0, 1);
@@ -347,6 +350,8 @@ export function createCycles({ view, teams, stage, voxels, flashes, log }) {
     time.value = seconds;
     for (const cycle of cycles) {
       const age = now - cycle.start;
+      // powered down: it stops where it is and goes dark
+      if (cycle.offAt !== undefined) continue;
       cycle.spin += dt * (cycle.state === 'ride' ? 30 : 9);
       if (cycle.state === 'rezz') {
         if (age >= REZZ.build[0] && age < REZZ.build[1]) glitchCubes(cycle, window01(age, REZZ.build));
@@ -375,6 +380,7 @@ export function createCycles({ view, teams, stage, voxels, flashes, log }) {
     for (let index = cycles.length - 1; index >= 0; index--) {
       const cycle = cycles[index];
       if (cycle.state === 'gone' && now - cycle.goneAt > CYCLE.wallFade) cycles.splice(index, 1);
+      else if (cycle.offAt !== undefined && now > cycle.allOffAt) cycles.splice(index, 1);
     }
   }
 
@@ -397,8 +403,8 @@ export function createCycles({ view, teams, stage, voxels, flashes, log }) {
   }
 
   function addLine(a, b, color, bright, width) {
-    if (Math.min(a.depth, b.depth) < CYCLE.nearClip) return;
-    lines.add(a, b, color, bright, width);
+    if (Math.min(a.depth, b.depth) < CYCLE.nearClip || power <= 0) return;
+    lines.add(a, b, color, bright * power, width);
   }
 
   function circle(point, center, radius, s, color, bright, width, count = 28) {
@@ -486,7 +492,8 @@ export function createCycles({ view, teams, stage, voxels, flashes, log }) {
   }
 
   // the black shape of the body and the wheels
-  function dark(cycle, point, alpha) {
+  function dark(cycle, point, opacity) {
+    const alpha = opacity * power;
     if (alpha <= 0.01) return;
     const triangle = (a, b, c) => {
       if (fillCount >= FILL_TRIANGLES || Math.min(a.depth, b.depth, c.depth) < CYCLE.nearClip) return;
@@ -554,12 +561,13 @@ export function createCycles({ view, teams, stage, voxels, flashes, log }) {
         const top = stage.project(point.x, CYCLE.wallHeight * cycle.scale, point.z);
         const heat = 1 - smoothstep(0, CYCLE.hotTime, now - point.born);
         const near = smoothstep(CYCLE.nearClip, CYCLE.nearClip + 0.5, base.depth);
-        return { base, top, alpha: fade * near, heat, team: cycle.teamIndex, along: point.along };
+        const lit = lightPower(point.offAt, now, point.offSeed);
+        return { base, top, alpha: fade * near * lit, heat, team: cycle.teamIndex, along: point.along };
       };
       const path = cycle.path;
       const last = path[path.length - 1];
       const points = cycle.state === 'ride' && last
-        ? [...path, { x: cycle.x, z: cycle.z, born: now, gone: false,
+        ? [...path, { x: cycle.x, z: cycle.z, born: now, gone: false, offAt: cycle.offAt, offSeed: cycle.offSeed,
           along: last.along + Math.hypot(cycle.x - last.x, cycle.z - last.z) }]
         : path;
       for (let index = 1; index < points.length; index++) {
@@ -571,7 +579,9 @@ export function createCycles({ view, teams, stage, voxels, flashes, log }) {
         if (endA.base.depth < CYCLE.nearClip || endB.base.depth < CYCLE.nearClip) continue;
         ribbon.quad(endA, endB);
       }
+      power = lightPower(cycle.offAt, now, cycle.offSeed);
       if (cycle.state !== 'gone') drawBike(cycle);
+      power = 1;
     }
     ribbon.end();
     lines.end();
@@ -580,11 +590,38 @@ export function createCycles({ view, teams, stage, voxels, flashes, log }) {
     fillGeometry.getAttribute('aAlpha').needsUpdate = true;
   }
 
+  // The Grid powers down: every cycle stops and goes out at the time
+  // `offTime(point)` gives, and its wall goes out stretch by stretch.
+  function powerDown(offTime) {
+    const stretch = 0.15;   // floor units of wall that go out together
+    for (const cycle of cycles) {
+      if (cycle.state === 'gone') continue;
+      cycle.offAt = offTime(centerOf(cycle));
+      cycle.offSeed = Math.random() * 100;
+      cycle.allOffAt = cycle.offAt;
+      let chunk = null;
+      for (const point of cycle.path) {
+        const index = Math.floor(point.along / stretch);
+        if (!chunk || chunk.index !== index) {
+          chunk = { index, offAt: offTime(stage.project(point.x, 0, point.z)), seed: Math.random() * 100 };
+        }
+        point.offAt = chunk.offAt;
+        point.offSeed = chunk.seed;
+        cycle.allOffAt = Math.max(cycle.allOffAt, chunk.offAt);
+      }
+    }
+  }
+
   return {
     group,
     counts,
     launch,
     shatter,
+    powerDown,
+    // a fresh Grid: no cycles
+    clear() {
+      cycles.length = 0;
+    },
     update,
     draw,
     get active() {
@@ -594,7 +631,8 @@ export function createCycles({ view, teams, stage, voxels, flashes, log }) {
     lights() {
       return cycles.filter((cycle) => cycle.light > 0.01).slice(0, 4).map((cycle) => {
         const point = stage.project(cycle.x, 0, cycle.z);
-        return { x: point.x, y: point.y, strength: cycle.light, size: (0.5 * Math.sqrt(cycle.scale)) / point.depth, color: cycle.color };
+        const lit = lightPower(cycle.offAt, now, cycle.offSeed);
+        return { x: point.x, y: point.y, strength: cycle.light * lit, size: (0.5 * Math.sqrt(cycle.scale)) / point.depth, color: cycle.color };
       });
     },
   };

@@ -13,8 +13,8 @@
 //                             the hands apart to rez a light cycle
 //   fist, held                a charging ring, then a derezz wave around the fist:
 //                             nearby walls, discs, batons and cycles break into voxels
-//   both fists held together  END OF LINE: everything derezzes, the Grid shuts down
-//                             and reboots
+//   both fists held together  END OF LINE: the Grid powers down light by light and
+//                             hands the screen back to the intro
 //   both palms open, facing   portal between the hands (not while you have a disc out)
 //
 // Real tracking jitters, so every action needs its pose to hold for a moment
@@ -24,6 +24,7 @@
 import { OneEuroFilter, PointFilter, VelocityWindow, clamp, easeTowards } from './filters.js';
 import { WALL } from './walls.js';
 import { BATON } from './baton.js';
+import { END_OF_LINE } from './endofline.js';
 
 export const CONTROLS = {
   pointHoldMs: 60,        // pointing must hold this long before it draws
@@ -45,8 +46,7 @@ export const CONTROLS = {
   pairDistance: 1.6,      // palm lengths between two fists that count as together ...
   pairNear: 3.0,          // ... and closer than this, single fists wait for the pair
   pairHoldMs: 500,
-  shutdownSpeed: 1.8,     // view units/s, the END OF LINE wave
-  shutdownReach: 2.4,
+  shutdownRing: 2.2,      // view units the END OF LINE ring runs out to
   rockHoldMs: 150,
   rockCooldownMs: 600,
   thumbsUpHoldMs: 150,
@@ -73,7 +73,7 @@ const PALM_POINTS = [0, 5, 9, 13, 17];
 // `log(name)` records an action for the stats.
 export function createControls({ hands, view, teams, walls, discs, cycles, batons, digitizer, endOfLine,
   voxels, flashes, stage, log }) {
-  const states = { left: createHandState('left'), right: createHandState('right') };
+  let states = { left: createHandState('left'), right: createHandState('right') };
   const discHands = { left: discHand(), right: discHand() };
   const waves = [];
   const portal = {
@@ -289,8 +289,16 @@ export function createControls({ hands, view, teams, walls, discs, cycles, baton
       states[id].fistLatched = true;
     }
     grab = null;
-    derezzWave(pair, CONTROLS.shutdownReach, CONTROLS.shutdownSpeed, teams.left.color, true);
-    flashes.spawn({ x: pair.x, y: pair.y, size: 0.2, duration: 0.7, color: teams.left.color, glint: 1.4 });
+    // a derezz wave around the fists, and a ring running out over the whole
+    // frame; behind it every light goes out in turn (endofline.js)
+    const color = teams.left.color;
+    derezzWave(pair, Math.max(0.2, CONTROLS.derezzRadius * palm), CONTROLS.derezzSpeed, color);
+    stage.shock(pair.x, pair.y, color, 1 / END_OF_LINE.perUnit, CONTROLS.shutdownRing);
+    const offTime = (point) => endOfLine.offTime(point);
+    walls.powerDown(offTime);
+    cycles.powerDown(offTime);
+    discs.powerDown(offTime);
+    flashes.spawn({ x: pair.x, y: pair.y, size: 0.2, duration: 0.7, color, glint: 1.4 });
   }
 
   // A one-shot gesture: fires once when `gesture` has been held for `holdMs`,
@@ -537,8 +545,22 @@ export function createControls({ hands, view, teams, walls, discs, cycles, baton
     return '';
   }
 
+  // a fresh Grid: nothing being drawn, held, grabbed or charged
+  function reset() {
+    states = { left: createHandState('left'), right: createHandState('right') };
+    for (const id of ['left', 'right']) Object.assign(discHands[id], discHand());
+    waves.length = 0;
+    grab = null;
+    Object.assign(pair, { near: false, sinceMs: 0, charge: 0 });
+    Object.assign(portal, { on: false, strength: 0, age: 0, readySinceMs: 0, lastReadyMs: -Infinity });
+    for (const tether of tethers) tether.strength = 0;
+  }
+
   return {
-    states,
+    get states() {
+      return states;
+    },
+    reset,
     portal,
     tethers,
     counts,

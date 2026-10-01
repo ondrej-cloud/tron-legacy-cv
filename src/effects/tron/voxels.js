@@ -109,6 +109,14 @@ export function createVoxels() {
   return {
     mesh,
     spawn,
+    // a fresh Grid: every cube gone
+    clear() {
+      for (let slot = 0; slot < CAPACITY; slot++) {
+        attributes.aLife[slot * 4] = -1e6;
+        deaths[slot] = 0;
+      }
+      dirty = true;
+    },
     update(time) {
       now = time;
       uniforms.uTime.value = time;

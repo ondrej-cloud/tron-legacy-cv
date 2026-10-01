@@ -27,7 +27,7 @@ import { createDiscs } from './disc.js';
 import { createCycles } from './cycles.js';
 import { createBatons } from './baton.js';
 import { createDigitizer } from './digitize.js';
-import { createEndOfLine } from './endofline.js';
+import { createEndOfLine, POWER_DOWN_LENGTH } from './endofline.js';
 import { cssFilter } from './grade.js';
 import { createControls } from './controls.js';
 import { createHud } from './hud.js';
@@ -40,6 +40,9 @@ export const meta = {
     + 'two fists together: end of line · both palms open: portal',
 };
 
+// s of darkness after END OF LINE before the Grid boots again in demo mode
+const DEMO_DARKNESS = 0.5;
+
 const RENDER = {
   bloom: { strength: 0.8, radius: 0.3, threshold: 0.6 },
   maxPixelRatio: 2,
@@ -47,7 +50,7 @@ const RENDER = {
   targetFps: 50,          // median fps below this for 2 s -> lower pixel ratio
 };
 
-export function createEffect({ container, hands }) {
+export function createEffect({ container, hands, host }) {
   const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
   let pixelRatio = Math.min(window.devicePixelRatio || 1, RENDER.maxPixelRatio);
   renderer.setPixelRatio(pixelRatio);
@@ -79,7 +82,8 @@ export function createEffect({ container, hands }) {
   const discs = createDiscs({ view, teams, walls, batons, stage, voxels, flashes, log });
   const cycles = createCycles({ view, teams, stage, voxels, flashes, log });
   const digitizer = createDigitizer({ hands, view, voxels, flashes, log });
-  const endOfLine = createEndOfLine({ log });
+  // the music dies with the lights (the host starts the Grid track again on entering)
+  const endOfLine = createEndOfLine({ log, onStart: () => host?.music?.fadeOut(POWER_DOWN_LENGTH) });
   scene.add(stage.group, digitizer.group, cycles.group, walls.object, discs.group, batons.group, voxels.mesh, flashes.group);
   const controls = createControls({ hands, view, teams, walls, discs, cycles, batons, digitizer, endOfLine,
     voxels, flashes, stage, log });
@@ -130,6 +134,40 @@ export function createEffect({ container, hands }) {
   const startMs = performance.now();
   let lastMs = startMs;
 
+  // A fresh Grid, as when the user enters from the intro: nothing left from
+  // before, both hands TRON, and the Grid lights up.
+  function enter() {
+    walls.clear();
+    discs.clear();
+    batons.clear();
+    cycles.clear();
+    voxels.clear();
+    flashes.clear();
+    stage.reset();
+    digitizer.cancel();
+    controls.reset();
+    teams.reset();
+    hud.reset();
+    endOfLine.boot();
+    log('grid boot');
+  }
+
+  // After END OF LINE the screen is dark: back to the intro. In demo mode
+  // there is no intro (and the scripted loop has to go on), so the Grid
+  // boots again in place after a moment of darkness.
+  let darkSince = null;
+  function afterEndOfLine() {
+    if (!endOfLine.finished) {
+      darkSince = null;
+      return;
+    }
+    if (darkSince === null) {
+      darkSince = seconds;
+      if (hands.mode !== 'demo' && host) host.returnToIntro();
+    }
+    if (hands.mode === 'demo' && seconds - darkSince > DEMO_DARKNESS) enter();
+  }
+
   return {
     // inside the Grid (grade.js); the host reads it every frame. The
     // digitizing laser dims it while the person is digitized, and so does
@@ -138,6 +176,7 @@ export function createEffect({ container, hands }) {
       return cssFilter(Math.min(digitizer.brightness, endOfLine.brightness()));
     },
     demoScript: (t) => demo.script(t),
+    onEnter: enter,
 
     update(nowMs, hostDt) {
       adaptResolution(nowMs, nowMs - lastMs);
@@ -145,6 +184,7 @@ export function createEffect({ container, hands }) {
       const dt = Math.min(1 / 20, Math.max(1 / 240, hostDt));
       seconds = (nowMs - startMs) / 1000;
       endOfLine.update(seconds);
+      afterEndOfLine();
       teams.left.update(dt);
       teams.right.update(dt);
       controls.update(nowMs, seconds, dt);

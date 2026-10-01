@@ -38,5 +38,14 @@ export function createTeams() {
       },
     };
   };
-  return { left: createTeam(), right: createTeam(), colors };
+  const teams = { left: createTeam(), right: createTeam(), colors };
+  // a fresh Grid: both hands TRON again
+  teams.reset = () => {
+    for (const team of [teams.left, teams.right]) {
+      team.index = 0;
+      team.color.copy(colors[0]);
+      team.changedAt = -Infinity;
+    }
+  };
+  return teams;
 }

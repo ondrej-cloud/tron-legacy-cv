@@ -1,4 +1,4 @@
-// Scripted hands for demo mode: a 44 s loop that runs through every gesture.
+// Scripted hands for demo mode: a 50 s loop that runs through every gesture.
 // The hands are procedural (gestures.js) and go through the same analysis as
 // camera hands, so this exercises the real gesture rules. Like a real hand,
 // the palm stays put while the fingers change pose: keyframes place the palm
@@ -33,13 +33,20 @@
 //                two handles and a big light cycle rezzes between the hands
 //                (~33.1 - 34.8), then drops and rides
 //         34.9   right hand rock: back to TRON cyan
-//   35.8 - 36.7  both fists come together and hold: END OF LINE (~36.7):
-//                everything derezzes, the Grid goes dark, the words are typed
-//   39.4 - 40.8  the Grid reboots
-//   41.0 - 44.0  both palms open again: portal (continues into the next loop)
+//   35.6 - 37.4  both hands draw one more wall each, beside the person
+//   37.65- 38.5  both fists come together and hold: END OF LINE (~38.5)
+//   38.5 - 41.6  the Grid powers down: a derezz wave around the fists, then
+//                the walls go out run by run (~38.9 - 40.3), the HUD pieces
+//                switch off one by one (~39.0 - 39.8), the floor goes dark
+//                row by row (39.2 - 40.6), the horizon shrinks to a dot
+//                (40.6 - 41.55)
+//   41.75- 43.85 END OF LINE is typed in the dark, holds, collapses to a dot
+//         44.4   (in the app: back to the intro.) In demo mode, after half a
+//                second of darkness the Grid boots in place (44.9 - 46.5)
+//   46.8 - 50.0  both palms open again: portal (continues into the next loop)
 import { POSES, blendPoses, poseToLandmarks } from '../../gestures.js';
 
-export const DEMO_LOOP = 44;
+export const DEMO_LOOP = 50;
 const PALM = 0.13;   // palm length, as hands.js uses for procedural hands
 const PALM_POINTS = [0, 5, 9, 13, 17];
 const ROLL = { left: -0.08, right: 0.08 };
@@ -126,13 +133,15 @@ const RIGHT = [
   key(34.6, 0.8, 0.56, 'open'),
   key(34.8, 0.8, 0.56, 'rock'),
   key(35.2, 0.8, 0.56, 'rock'),
-  key(35.4, 0.78, 0.58, 'open'),
-  hidden(35.5),
-  key(35.8, 0.56, 0.6, 'fist'),           // the two fists come together ...
-  key(36.1, 0.505, 0.6, 'fist'),
-  key(36.9, 0.505, 0.6, 'fist'),          // ... and hold: END OF LINE
-  hidden(37.1),
-  key(41.0, 0.66, 0.64, 'open'),
+  tip(35.6, 0.86, 0.25, 'point'),
+  tip(35.85, 0.86, 0.25, 'point'),
+  ...path(36.05, 0.5, [[0.86, 0.25], [0.72, 0.25], [0.72, 0.45], [0.62, 0.45]]),
+  tip(37.4, 0.62, 0.45, 'point'),
+  key(37.65, 0.56, 0.55, 'fist'),         // the two fists come together ...
+  key(37.95, 0.505, 0.58, 'fist'),
+  key(39.9, 0.505, 0.58, 'fist'),         // ... and hold: END OF LINE, while the HUD switches off
+  hidden(40.0),
+  key(46.8, 0.66, 0.64, 'open'),
   key(DEMO_LOOP, 0.635, 0.62, 'open'),
 ];
 
@@ -169,11 +178,15 @@ const LEFT = [
   key(32.6, 0.7375, 0.508, 'open'),
   key(33.6, 0.56, 0.52, 'open'),          // pulls
   hidden(33.7),
-  key(35.8, 0.44, 0.6, 'fist'),
-  key(36.1, 0.495, 0.6, 'fist'),
-  key(36.9, 0.495, 0.6, 'fist'),
-  hidden(37.1),
-  key(41.0, 0.34, 0.66, 'open'),
+  tip(35.6, 0.14, 0.25, 'point'),
+  tip(35.85, 0.14, 0.25, 'point'),
+  ...path(36.05, 0.5, [[0.14, 0.25], [0.28, 0.25], [0.28, 0.45], [0.38, 0.45]]),
+  tip(37.4, 0.38, 0.45, 'point'),
+  key(37.65, 0.44, 0.55, 'fist'),
+  key(37.95, 0.495, 0.58, 'fist'),
+  key(39.9, 0.495, 0.58, 'fist'),
+  hidden(40.0),
+  key(46.8, 0.34, 0.66, 'open'),
   key(DEMO_LOOP, 0.365, 0.62, 'open'),
 ];
 

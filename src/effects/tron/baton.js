@@ -512,6 +512,12 @@ export function createBatons({ view, walls, voxels, flashes, log }) {
     release,
     split,
     derezzWithin,
+    // a fresh Grid: no batons or handles
+    clear() {
+      batons.left = null;
+      batons.right = null;
+      handles.length = 0;
+    },
     // the baton a hand holds (not one that is collapsing)
     get(id) {
       const baton = batons[id];

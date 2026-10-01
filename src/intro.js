@@ -2,7 +2,12 @@
 // title, a faint horizon, what the camera is for), then boots into the Grid,
 // shows the controls and waits for both open palms, Enter or the button.
 //
-//   runIntro({ hands, onDone })
+//   runIntro({ hands, onDone, returning })
+//
+// returning: true when the app hands the screen back after END OF LINE. The
+// camera is already running, so there is no camera screen: the Grid reboots
+// out of black (a quicker boot), then the controls and the way in as usual.
+// Each call builds a fresh overlay; a run still on screen is torn down first.
 //
 // A full-screen overlay goes up immediately. The camera is only requested
 // from the "Enable camera" button, or straight away when the permission was
@@ -23,9 +28,11 @@ import { createTitle } from './intro-title.js';
 
 const FONT_TIMEOUT = 1500;       // ms to wait for the web fonts before showing anything
 
-// Boot timeline in seconds. Reduced motion runs the same clock faster.
+// Boot timelines in seconds. Reduced motion runs the same clock faster.
+// logStep: delay between the system log's rows.
 const BOOT = {
   log: 0.15,
+  logStep: 0.3,
   horizon: 0.3,
   floor: 0.75,
   sweep: 1.45,
@@ -35,6 +42,22 @@ const BOOT = {
   manual: 2.85,
   enter: 3.5,
   ready: 3.9,
+};
+// The reboot after END OF LINE: the horizon stutters back on, the floor
+// redraws and the title rezzes again, in about two and a half seconds.
+const REBOOT = {
+  log: 0.05,
+  logStep: 0.12,
+  horizon: 0.25,
+  floor: 0.6,
+  sweep: 0.95,
+  sweepDuration: 0.6,
+  subtitle: 1.45,
+  glint: 1.8,
+  manual: 1.7,
+  enter: 2.2,
+  ready: 2.45,
+  reboot: true,
 };
 const REDUCED_SPEED = 3.3;
 const PALMS_HOLD = 0.8;          // s both open palms must stay up to enter
@@ -83,7 +106,12 @@ async function cameraAllowed() {
   }
 }
 
-export function runIntro({ hands, onDone }) {
+// The run on screen, so that a new one can tear it down first.
+let currentRun = null;
+
+export function runIntro({ hands, onDone, returning = false }) {
+  currentRun?.dispose();
+  const timing = returning ? REBOOT : BOOT;
   const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   const dom = buildDom();
   const { root } = dom;
@@ -97,16 +125,16 @@ export function runIntro({ hands, onDone }) {
   const overlay = createOverlay({ canvas: dom.fx, ring: dom.ring, reduced });
   const glyphs = dom.glyphs.map((canvas, index) => createGlyph(canvas, CONTROLS[index], index * 0.45));
   const typed = new Map();
-  const titleTiming = { sweep: { start: BOOT.sweep, duration: BOOT.sweepDuration }, glintAt: BOOT.glint };
+  const titleTiming = { sweep: { start: timing.sweep, duration: timing.sweepDuration }, glintAt: timing.glint };
   const streaks = [
-    { lane: 2, start: BOOT.floor + 0.35, duration: 1.1, color: CYAN },
-    { lane: -5, start: BOOT.floor + 0.8, duration: 1.3, color: CYAN },
-    { depth: 1.6, direction: -1, start: BOOT.subtitle + 0.2, duration: 1.4, color: ORANGE },
+    { lane: 2, start: timing.floor + 0.35, duration: 1.1, color: CYAN },
+    { lane: -5, start: timing.floor + 0.8, duration: 1.3, color: CYAN },
+    { depth: 1.6, direction: -1, start: timing.subtitle + 0.2, duration: 1.4, color: ORANGE },
   ];
-  let nextStreak = BOOT.ready + 5;
+  let nextStreak = timing.ready + 5;
   let streakCount = 0;
 
-  let phase = 'loading';   // loading -> gate -> boot -> leaving
+  let phase = 'loading';   // loading -> gate -> boot -> leaving -> done
   let frameId = 0;
   let framesSeen = 0;
   let lastMs = performance.now();
@@ -169,11 +197,12 @@ export function runIntro({ hands, onDone }) {
   }
 
   function updateLog() {
-    if (boot < BOOT.log) return;
-    type(dom.logHead, ready ? 'Grid // online' : 'Grid // boot sequence');
+    if (boot < timing.log) return;
+    const booting = returning ? 'Grid // reboot' : 'Grid // boot sequence';
+    type(dom.logHead, ready ? 'Grid // online' : booting);
     const state = systemState(hands);
     dom.logRows.forEach((entry, index) => {
-      if (boot < BOOT.log + 0.3 * (index + 1)) return;
+      if (boot < timing.log + timing.logStep * (index + 1)) return;
       const [label, value, tone] = state[entry.key];
       const labelDone = type(entry.label, label);
       if (labelDone !== entry.row.classList.contains('is-typed')) entry.row.classList.toggle('is-typed', labelDone);
@@ -186,11 +215,11 @@ export function runIntro({ hands, onDone }) {
 
   function updateReveals() {
     for (const element of dom.reveals) {
-      if (!element.classList.contains('is-on') && boot >= BOOT[element.dataset.at]) element.classList.add('is-on');
+      if (!element.classList.contains('is-on') && boot >= timing[element.dataset.at]) element.classList.add('is-on');
     }
-    if (boot >= BOOT.subtitle && !dom.head.classList.contains('is-lit')) dom.head.classList.add('is-lit');
-    if (manualSince === null && boot >= BOOT.manual) manualSince = seconds;
-    if (!ready && boot >= BOOT.ready) {
+    if (boot >= timing.subtitle && !dom.head.classList.contains('is-lit')) dom.head.classList.add('is-lit');
+    if (manualSince === null && boot >= timing.manual) manualSince = seconds;
+    if (!ready && boot >= timing.ready) {
       ready = true;
       root.classList.add('is-ready');
       dom.enterButton.focus({ preventScroll: true });
@@ -268,7 +297,7 @@ export function runIntro({ hands, onDone }) {
   }
 
   function startBoot() {
-    if (phase === 'boot' || phase === 'leaving') return;
+    if (phase !== 'loading' && phase !== 'gate') return;
     phase = 'boot';
     dom.gate.classList.remove('is-on');
     root.classList.add('is-booting');
@@ -278,8 +307,8 @@ export function runIntro({ hands, onDone }) {
 
   function skipBoot() {
     if (phase !== 'boot' || ready) return;
-    skipped += BOOT.ready - boot;
-    boot = BOOT.ready;
+    skipped += timing.ready - boot;
+    boot = timing.ready;
     root.classList.add('is-instant');
     updateReveals();
     void root.offsetWidth;   // apply the end state before transitions come back
@@ -323,12 +352,17 @@ export function runIntro({ hands, onDone }) {
   }
 
   function finish() {
+    if (phase === 'done') return;
+    phase = 'done';
     cancelAnimationFrame(frameId);
+    clearTimeout(resizeTimer);
     window.removeEventListener('resize', onResize);
     window.removeEventListener('keydown', onKeyDown, true);
     resizeObserver.disconnect();
     root.remove();
     styles.link.remove();
+    document.body.classList.remove('intro-open');
+    if (currentRun === run) currentRun = null;
   }
 
   // The gate is a still picture: redraw it only when the layout changed.
@@ -348,7 +382,7 @@ export function runIntro({ hands, onDone }) {
     const dt = Math.min(0.1, (nowMs - lastMs) / 1000);
     lastMs = nowMs;
     framesSeen++;
-    if (phase === 'loading') return;
+    if (phase === 'loading' || phase === 'done') return;
     // fade in only once the title has been drawn in its own font
     if (root.classList.contains('is-loading')) root.classList.remove('is-loading');
     if (phase === 'gate') {
@@ -377,12 +411,12 @@ export function runIntro({ hands, onDone }) {
     if (palmsArmed && palmCount === 2) palmProgress = Math.min(1, palmProgress + dt / PALMS_HOLD);
     else palmProgress = Math.max(0, palmProgress - dt / PALMS_DRAIN);
     if (palmProgress >= 1) leave();
-    if (ready && hands.mode === 'demo' && !demoRestarted && boot >= BOOT.ready + DEMO_PALMS_AFTER) {
+    if (ready && hands.mode === 'demo' && !demoRestarted && boot >= timing.ready + DEMO_PALMS_AFTER) {
       demoRestarted = true;
       hands.setMode('demo');
     }
 
-    if (boot >= BOOT.enter - 0.2) {
+    if (boot >= timing.enter - 0.2) {
       const prompt = promptState(hands, palmCount);
       setText(dom.prompt, prompt.prompt);
       setText(dom.hint, prompt.hint);
@@ -395,6 +429,10 @@ export function runIntro({ hands, onDone }) {
     else if (leaving) exitElapsed += Math.min(dt, 1 / 30);
     const exit = clamp01(exitElapsed / (reduced ? REDUCED_EXIT_TIME : EXIT_TIME));
     let slit = null;
+    // black behind everything until the backdrop thins out over the camera
+    if ((leaving || boot >= timing.manual) && root.style.background !== 'transparent') {
+      root.style.background = 'transparent';
+    }
     if (leaving && reduced) {
       root.style.opacity = String(1 - exit);
     } else if (leaving) {
@@ -411,12 +449,13 @@ export function runIntro({ hands, onDone }) {
 
     floor.draw({
       t: boot,
-      timing: BOOT,
+      timing,
       horizon,
-      backdrop: 1 - (1 - BACKDROP_READY) * smooth((boot - BOOT.manual) / 1.2),
+      backdrop: 1 - (1 - BACKDROP_READY) * smooth((boot - timing.manual) / 1.2),
       brightness: 1 + (leaving ? 1.6 * (1 - exit) : 0),
       scroll: reduced ? 0 : seconds * FLOOR_SPEED * (1 + (leaving ? 14 * exit : 0)),
       flare: slit ? 1.6 * smooth(exit / 0.22) * (1 - smooth((exit - 0.22) / 0.3)) : 0,
+      reboot: Boolean(timing.reboot) && !reduced,
       streaks,
       burst: { amount: slit ? 1 - smooth((exit - 0.3) / 0.4) : 0, phase: clamp01(exit / 0.6) },
       slit,
@@ -431,13 +470,13 @@ export function runIntro({ hands, onDone }) {
           if (shown >= 0.3 + index * 0.07) glyph.draw(shown);
         });
       }
-      if (boot >= BOOT.enter - 0.2) overlay.drawRing(palms, palmProgress, seconds);
+      if (boot >= timing.enter - 0.2) overlay.drawRing(palms, palmProgress, seconds);
     }
     overlay.draw({
       hands,
       palms,
       progress: palmProgress,
-      alpha: smooth((boot - BOOT.manual) / 0.8) * (1 - smooth(exit / 0.3)),
+      alpha: smooth((boot - timing.manual) / 0.8) * (1 - smooth(exit / 0.3)),
       seam: slit && { ...slit, alpha: 1 - smooth((exit - 0.75) / 0.25) },
     });
 
@@ -480,18 +519,26 @@ export function runIntro({ hands, onDone }) {
   resizeObserver.observe(dom.manual);
   resizeObserver.observe(dom.head);
 
+  const run = { dispose: finish };
+  currentRun = run;
+
   let fontsArrived = false;
   fonts.then(() => {
     fontsArrived = true;
   });
   Promise.all([styles.loaded, Promise.race([fonts, timeout(FONT_TIMEOUT)])]).then(async () => {
+    if (phase === 'done') return;
+    // runs that skip the camera screen start booting before transitions are
+    // switched on, so the title block starts hidden instead of fading out
+    const bootNow = returning || hands.mode === 'demo';
+    if (bootNow) startBoot();
     void root.offsetWidth;
     root.classList.remove('is-instant');
-    root.style.background = 'transparent';
     resize();
     if (!fontsArrived) {
       // too slow: start with fallback fonts and swap the title in while it is still
       fonts.then(() => {
+        if (phase === 'done') return;
         if (phase === 'boot' || phase === 'leaving') {
           titleStale = true;
         } else {
@@ -501,11 +548,12 @@ export function runIntro({ hands, onDone }) {
       });
     }
     frameId = requestAnimationFrame(frame);
+    if (returning) return;   // the camera is already running
     const allowed = await cameraAllowed();
-    if (hands.mode === 'demo') {
+    if (phase === 'done') return;
+    if (bootNow) {
       // the demo needs no camera; use it as the background only if it's already allowed
       if (allowed) hands.start();
-      startBoot();
     } else if (allowed || hands.started) {
       hands.start();
       hands.cameraReady.then((granted) => (granted ? startTracking() : showGate('denied')));

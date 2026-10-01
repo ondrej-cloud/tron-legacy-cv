@@ -10,6 +10,7 @@ import * as THREE from 'three';
 import { additiveMaterial, uploadPrefix } from './gl.js';
 import { clamp, easeTowards } from './filters.js';
 import { BATON, distanceToSegment, sweptContains } from './baton.js';
+import { lightPower } from './endofline.js';
 
 export const DISC = {
   radiusPerPalm: 0.72,      // disc radius relative to the palm length
@@ -567,6 +568,17 @@ export function createDiscs({ view, teams, walls, batons, stage, voxels, flashes
     summon,
     throwDisc,
     shatter,
+    // The Grid powers down: every disc goes out at the time `offTime(point)` gives.
+    powerDown(offTime) {
+      for (const disc of discs) {
+        disc.offAt = offTime(disc);
+        disc.offSeed = Math.random() * 100;
+      }
+    },
+    // a fresh Grid: no discs
+    clear() {
+      discs.length = 0;
+    },
     // a derezz wave: every disc within `radius` of `origin` shatters
     shatterWithin(origin, radius) {
       for (const disc of discs) {
@@ -602,6 +614,13 @@ export function createDiscs({ view, teams, walls, batons, stage, voxels, flashes
           disc.vy *= Math.exp(-dt * 3);
           disc.spin += DISC.heldSpin * dt;
           if (disc.alpha <= 0) disc.state = 'gone';
+        }
+        if (disc.offAt !== undefined) {
+          // the Grid is powering down: it slows, flickers and goes out
+          disc.vx *= Math.exp(-dt * 2);
+          disc.vy *= Math.exp(-dt * 2);
+          disc.alpha = Math.min(disc.alpha, lightPower(disc.offAt, now, disc.offSeed));
+          if (now >= disc.offAt) disc.state = 'gone';
         }
         updateTrail(disc);
       }

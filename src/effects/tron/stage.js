@@ -1,7 +1,7 @@
 // The stage: one fullscreen pass with the Grid floor along the bottom of the
 // frame, the portal's beam of light, the local flash when a hand switches
 // team and the derezz shock rings, plus the particles rising in the portal.
-// The Grid's lights can be powered down and rebooted (endofline.js).
+// The Grid's lights power down and boot up row by row (endofline.js).
 //
 // The floor is seen by a camera `cameraHeight` above it, looking level at
 // the horizon. A floor point (x, z) in grid space, at height h, shows at
@@ -54,7 +54,8 @@ const stageFragment = /* glsl */`
   uniform vec4 uCycle[${STAGE.cycleLights}];   // view x, y, strength, size
   uniform vec3 uCycleColor[${STAGE.cycleLights}];
   uniform float uRiding;         // 0..1, a light cycle is on the floor
-  uniform vec3 uPower;           // floor lights, horizon line, how far out the horizon reaches (0..1)
+  uniform vec4 uPower;           // floor glow, horizon line, how far out the horizon reaches (0..1), its last dot
+  uniform float uFloorCut;       // floor rows deeper than this are dark
   varying vec2 vUv;
 
   const float TAU = 6.28318530718;
@@ -80,6 +81,15 @@ const stageFragment = /* glsl */`
     vec2 lines = 1.0 - smoothstep(halfWidth, halfWidth + fw * 1.2, d);
     float line = max(lines.x, lines.y) * (1.0 - smoothstep(0.2, 0.65, max(fw.x, fw.y)));
     float near = 0.55 + 0.45 * smoothstep(0.0, 0.25, below + 0.05);
+
+    // powering down or up, row by row: rows past the cut are dark, and the
+    // rows right at it flicker
+    float row = floor(cell.y + 0.5);
+    float rowDepth = row / ${STAGE.gridDensity.toFixed(1)} - uTime * ${STAGE.gridScroll.toFixed(3)};
+    float powered = step(rowDepth, uFloorCut);
+    float dying = step(uFloorCut, rowDepth) * step(rowDepth, uFloorCut * 1.3 + 0.15);
+    float flicker = step(0.55, fract(sin(row * 12.9898 + floor(uTime * 24.0) * 78.233) * 43758.5453));
+    line *= max(powered, dying * flicker * 0.8);
 
     // the portal lights the floor outwards from its foot
     vec2 foot = vec2(uPortal.x, HORIZON);
@@ -111,14 +121,17 @@ const stageFragment = /* glsl */`
     float drawn = 1.0 - smoothstep(reach - 0.01, reach, abs(p.x));
     // the tips of a horizon that is still drawing out glow white
     float fromTip = (abs(p.x) - reach) / 0.02;
-    float tips = exp(-fromTip * fromTip) * step(uPower.z, 0.999);
+    float tips = exp(-fromTip * fromTip) * step(uPower.z, 0.999) * step(0.001, uPower.z);
     float d = abs(p.y - HORIZON);
     float strength = ${STAGE.idleHorizon.toFixed(3)} + uPortal.z * 0.6 + uRiding * 0.25;
     float nearPortal = 0.55 + 0.45 * exp(-abs(p.x - uPortal.x) * 2.5 * (1.0 - uPortal.z * 0.6));
     float line = crispLine(d, 0.5 * uPixel) * 1.3 + exp(-d * 90.0) * 0.18;
     vec3 col = mix(sideColor(p.x, 0.45), vec3(1.0), 0.25) * line * strength * nearPortal * drawn;
-    col += vec3(1.0) * line * tips * 2.0;
-    return col * uPower.y;
+    col += vec3(1.0) * line * tips * 1.2;
+    // what is left of a horizon that shrank away: a point of light
+    vec2 toDot = (p - vec2(0.0, HORIZON)) / (2.5 * uPixel);
+    float point = exp(-dot(toDot, toDot)) * 2.5 + exp(-length(toDot) / 4.0) * 0.4;
+    return col * uPower.y + vec3(1.0) * point * uPower.w;
   }
 
   vec3 beam(vec2 p) {
@@ -275,7 +288,8 @@ export function createStage(view, teams) {
     uCycle: { value: Array.from({ length: STAGE.cycleLights }, () => new THREE.Vector4()) },
     uCycleColor: { value: Array.from({ length: STAGE.cycleLights }, () => new THREE.Color()) },
     uRiding: { value: 0 },
-    uPower: { value: new THREE.Vector3(1, 1, 1) },
+    uPower: { value: new THREE.Vector4(1, 1, 1, 0) },
+    uFloorCut: { value: 1e4 },
   };
   const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), additiveMaterial(fullscreenVertex, stageFragment, uniforms));
   quad.frustumCulled = false;
@@ -319,6 +333,11 @@ export function createStage(view, teams) {
     gridZ(depth) {
       return depth + STAGE.gridScroll * now;
     },
+    // a fresh Grid: no flashes or rings left over
+    reset() {
+      for (const id of ['left', 'right']) sweepState[id].start = -Infinity;
+      for (const shock of shockState) shock.start = -Infinity;
+    },
     sweep(id, x, y, color) {
       Object.assign(sweepState[id], { x, y, start: now });
       uniforms.uSweepColor.value[id === 'left' ? 0 : 1].copy(color);
@@ -333,7 +352,8 @@ export function createStage(view, teams) {
     // cycleLights: [{ x, y, strength, size, color }],
     // light: { floor, horizon, reveal } (endofline.js)
     update(time, portal, tethers, cycleLights, light) {
-      uniforms.uPower.value.set(light.floor, light.horizon, light.reveal);
+      uniforms.uPower.value.set(light.floor, light.horizon, light.reveal, light.dot);
+      uniforms.uFloorCut.value = light.floorCut;
       const dt = Math.min(0.1, Math.max(0, time - now));
       now = time;
       uniforms.uTime.value = time;

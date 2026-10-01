@@ -13,6 +13,9 @@ const FLOOR = {
   maxPixelRatio: 2,
 };
 
+// Brightness of the horizon in 70 ms steps as it comes back on after END OF LINE.
+const REBOOT_FLICKER = [0.9, 0.05, 0.7, 0, 0.35, 1, 0.15, 1];
+
 const clamp01 = (value) => Math.min(1, Math.max(0, value));
 const smooth = (value) => {
   const t = clamp01(value);
@@ -161,9 +164,20 @@ export function createFloor(canvas) {
     }
     if (t < timing.horizon - 0.2) return;
 
-    // a point of light flickers on, then stretches into the horizon
-    const spread = easeOut((t - timing.horizon) / 0.65);
-    const flash = Math.max(0, 1 - Math.abs(t - timing.horizon - 0.05) / 0.5) + state.flare;
+    let spread;
+    let flash;
+    if (state.reboot) {
+      // the whole line stutters back on, like a tube that was only just switched off
+      const since = t - timing.horizon;
+      if (since < 0) return;
+      context.globalAlpha = since < REBOOT_FLICKER.length * 0.07 ? REBOOT_FLICKER[Math.floor(since / 0.07)] : 1;
+      spread = easeOut(since / 0.3);
+      flash = 0.7 * Math.max(0, 1 - Math.abs(since - 0.4) / 0.35) + state.flare;
+    } else {
+      // a point of light flickers on, then stretches into the horizon
+      spread = easeOut((t - timing.horizon) / 0.65);
+      flash = Math.max(0, 1 - Math.abs(t - timing.horizon - 0.05) / 0.5) + state.flare;
+    }
     const half = Math.max(2, spread * width * 0.56);
     // the glow is an ellipse, so it tapers off with the line instead of ending square
     const band = 26 + 40 * flash;
@@ -198,6 +212,7 @@ export function createFloor(canvas) {
       context.fillRect(-radius * 2, -radius * 2, radius * 4, radius * 4);
       context.restore();
     }
+    context.globalAlpha = 1;
   }
 
   // A light cycle head with its wall: along a lane (towards the viewer) or
@@ -261,7 +276,8 @@ export function createFloor(canvas) {
   }
 
   // state: { t, timing, horizon, backdrop, brightness, scroll, flare, streaks,
-  //          burst: { amount, phase }, slit: { top, bottom } | null, dormant }
+  //          burst: { amount, phase }, slit: { top, bottom } | null, dormant,
+  //          reboot: the horizon comes back on after END OF LINE }
   function draw(state) {
     if (!layers || Math.abs(layers.horizon - state.horizon) > 0.5) layers = buildLayers(state.horizon);
     context.setTransform(1, 0, 0, 1, 0, 0);

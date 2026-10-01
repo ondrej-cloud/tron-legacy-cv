@@ -79,6 +79,10 @@ export function createFlashes(view) {
       flash.uniforms.uProgress.value = 0;
       flash.mesh.visible = true;
     },
+    // a fresh Grid: no flashes
+    clear() {
+      for (const flash of flashes) flash.mesh.visible = false;
+    },
     update(time) {
       now = time;
       for (const flash of flashes) {

@@ -3,8 +3,10 @@
 // skeleton, the hand's team, its gesture and what it is doing, five finger
 // bars (how straight each finger is), which side of the hand faces the
 // camera, and small readouts. A fist that charges up shows a ring filling
-// around it, and END OF LINE is typed in the middle of the screen when the
-// Grid shuts down. Thin crisp lines, a faint flicker and scanlines.
+// around it. When the Grid powers down, the pieces of the HUD switch off
+// one by one like an old screen (a flicker, a squash to a bright line, a
+// dot), and END OF LINE is typed in the dark, then switched off the same
+// way. Thin crisp lines, a faint flicker and scanlines.
 import { HAND_CONNECTIONS } from '../../hands.js';
 
 const HUD = {
@@ -74,6 +76,46 @@ export function createHud(container, { hands, view, teams, controls, endOfLine }
     return box;
   }
 
+  // Draws one piece of a hand's HUD (`element`, in the order they switch
+  // off), or switches it off like an old screen: it squashes to a bright
+  // line around the middle of `area`, the line shrinks to a dot, gone.
+  function powered(element, hand, area, draw) {
+    const power = endOfLine.hudPower(element, hand.id);
+    if (power.alpha <= 0) return;
+    const p = power.collapse;
+    const cx = (area.x0 + area.x1) / 2;
+    const cy = (area.y0 + area.y1) / 2;
+    context.save();
+    context.globalAlpha *= power.alpha;
+    if (p > 0) {
+      const squash = Math.max(0.02, 1 - p * 2.2);
+      const shrink = p < 0.45 ? 1 : Math.max(0, 1 - (p - 0.45) / 0.45);
+      context.translate(cx, cy);
+      context.scale(shrink, squash);
+      context.translate(-cx, -cy);
+    }
+    if (p < 0.45) draw();
+    context.restore();
+    if (p > 0) collapseLine(cx, cy, (area.x1 - area.x0) / 2, p, WHITE);
+  }
+
+  // the bright line and dot an old screen leaves as it switches off
+  function collapseLine(x, y, halfWidth, p, color) {
+    const shrink = p < 0.45 ? 1 : Math.max(0, 1 - (p - 0.45) / 0.45);
+    const alpha = p < 0.9 ? Math.min(1, p * 4) : Math.max(0, 1 - (p - 0.9) / 0.1);
+    context.save();
+    context.shadowColor = `rgba(${color}, ${alpha})`;
+    context.shadowBlur = 10;
+    context.fillStyle = `rgba(${color}, ${alpha})`;
+    if (shrink > 0.02) context.fillRect(x - halfWidth * shrink, y - 0.75, halfWidth * shrink * 2, 1.5);
+    else {
+      context.beginPath();
+      context.arc(x, y, 2, 0, Math.PI * 2);
+      context.fill();
+    }
+    context.restore();
+  }
+
   function drawHand(hand, nowMs, dt, accent) {
     const width = view.width;
     const height = view.height;
@@ -89,75 +131,22 @@ export function createHud(container, { hands, view, teams, controls, endOfLine }
     const box = smoothBox(hand.id, target, dt);
     const state = controls.states[hand.id];
 
-    // skeleton and joints: what the tracker sees
-    context.lineWidth = 1;
-    context.strokeStyle = `rgba(${accent}, 0.32)`;
-    context.beginPath();
-    for (const [a, b] of HAND_CONNECTIONS) {
-      context.moveTo(points[a].x, points[a].y);
-      context.lineTo(points[b].x, points[b].y);
-    }
-    context.stroke();
-    context.fillStyle = `rgba(${WHITE}, 0.7)`;
-    for (const point of points) context.fillRect(point.x - 1.5, point.y - 1.5, 3, 3);
-    context.strokeStyle = `rgba(${accent}, 0.85)`;
-    for (const index of [4, 8, 12, 16, 20]) {
-      context.beginPath();
-      context.arc(points[index].x, points[index].y, 4, 0, Math.PI * 2);
-      context.stroke();
-    }
-    // thumb contact: a ring where the thumb touches a fingertip
-    for (const [finger, tipIndex] of [['index', 8], ['middle', 12], ['ring', 16], ['pinky', 20]]) {
-      if (!hand.touching[finger]) continue;
-      const x = (points[4].x + points[tipIndex].x) / 2;
-      const y = (points[4].y + points[tipIndex].y) / 2;
-      context.strokeStyle = `rgba(${WHITE}, 0.95)`;
-      context.lineWidth = 1.5;
-      context.beginPath();
-      context.arc(x, y, 9, 0, Math.PI * 2);
-      context.stroke();
-      context.lineWidth = 1;
-    }
-
-    // bracket
     const { x0, y0, x1, y1 } = box;
     drawn.push([x0 - 60, y0 - 45, x1 - x0 + 120, y1 - y0 + 90]);
-    const arm = Math.min(HUD.bracket, (x1 - x0) / 3, (y1 - y0) / 3);
-    context.strokeStyle = `rgba(${accent}, 0.9)`;
-    context.lineWidth = 1.25;
-    context.beginPath();
-    for (const [x, y, dx, dy] of [[x0, y0, 1, 1], [x1, y0, -1, 1], [x1, y1, -1, -1], [x0, y1, 1, -1]]) {
-      context.moveTo(x + dx * arm, y);
-      context.lineTo(x, y);
-      context.lineTo(x, y + dy * arm);
-    }
-    // centre ticks on each side
-    const midX = (x0 + x1) / 2;
-    const midY = (y0 + y1) / 2;
-    context.moveTo(midX, y0 - 3); context.lineTo(midX, y0 + 3);
-    context.moveTo(midX, y1 - 3); context.lineTo(midX, y1 + 3);
-    context.moveTo(x0 - 3, midY); context.lineTo(x0 + 3, midY);
-    context.moveTo(x1 - 3, midY); context.lineTo(x1 + 3, midY);
-    context.stroke();
+    const area = { x0, y0, x1, y1 };
 
-    // header: a tag with the hand and its team, the gesture, the action
-    const side = hand.physical === 'left' ? 'L' : 'R';
-    const tag = typed(`${hand.id}-team`, `${side} ${teams[hand.id].name}`, nowMs);
-    setFont(10, 700);
-    context.letterSpacing = '0.1em';
-    const tagWidth = Math.ceil(context.measureText(tag).width) + 9;
-    context.fillStyle = `rgba(${accent}, 0.9)`;
-    context.fillRect(x0, y0 - 33, tagWidth, 15);
-    context.textAlign = 'left';
-    context.fillStyle = 'rgba(0, 0, 0, 1)';
-    context.fillText(tag, x0 + 4.5, y0 - 22);
-    context.letterSpacing = '0px';
-    const gesture = GESTURE_NAMES[hand.gesture] ?? hand.gesture.toUpperCase();
-    glowText(typed(`${hand.id}-gesture`, gesture, nowMs), x0 + tagWidth + 7, y0 - 21, WHITE, 0.95, 13,
-      { weight: 700, spacing: 0.2 });
-    if (state.action) {
-      glowText(typed(`${hand.id}-action`, `// ${state.action}`, nowMs), x0, y0 - 6, accent, 0.95, 10, { spacing: 0.16 });
-    }
+    // readouts under the bracket
+    const roll = Math.round((hand.roll * 180) / Math.PI);
+    const readoutY = Math.min(y1 + 14, height - 60);
+    powered(0, hand, { x0, y0: readoutY - 10, x1: x0 + 150, y1: readoutY + 16 }, () => {
+      setFont(9);
+      context.textAlign = 'left';
+      context.letterSpacing = '0.08em';
+      context.fillStyle = `rgba(${WHITE}, 0.55)`;
+      context.fillText(`X ${hand.x.toFixed(2)}  Y ${hand.y.toFixed(2)}`, x0, readoutY);
+      context.fillText(`ROLL ${roll >= 0 ? '+' : ''}${roll}°  ${hand.fingers?.count ?? 0}/5 UP`, x0, readoutY + 12);
+      context.letterSpacing = '0px';
+    });
 
     // finger bars on the outer side: how straight each finger is
     const { width: barWidth, gap, height: barHeight } = HUD.bars;
@@ -166,50 +155,119 @@ export function createHud(container, { hands, view, teams, controls, endOfLine }
     let barsX = outerRight ? x1 + 10 : x0 - 10 - barsWidth;
     if (barsX < 6 || barsX + barsWidth > width - 6) barsX = outerRight ? x0 - 10 - barsWidth : x1 + 10;
     const barsY = y0 + 4;
-    FINGERS.forEach((finger, index) => {
-      const x = barsX + index * (barWidth + gap);
-      const straight = 1 - (hand.fingers?.curl[finger] ?? 0);
-      const extended = hand.fingers?.extended[finger];
-      context.strokeStyle = `rgba(${WHITE}, 0.28)`;
-      context.lineWidth = 1;
-      context.strokeRect(x + 0.5, barsY + 0.5, barWidth - 1, barHeight - 1);
-      const fill = Math.max(1, straight * barHeight);
-      context.fillStyle = extended ? `rgba(${accent}, 0.95)` : `rgba(${WHITE}, 0.45)`;
-      context.fillRect(x, barsY + barHeight - fill, barWidth, fill);
+    powered(1, hand, { x0: barsX - 4, y0: barsY, x1: barsX + barsWidth + 4, y1: barsY + barHeight + 40 }, () => {
+      FINGERS.forEach((finger, index) => {
+        const x = barsX + index * (barWidth + gap);
+        const straight = 1 - (hand.fingers?.curl[finger] ?? 0);
+        const extended = hand.fingers?.extended[finger];
+        context.strokeStyle = `rgba(${WHITE}, 0.28)`;
+        context.lineWidth = 1;
+        context.strokeRect(x + 0.5, barsY + 0.5, barWidth - 1, barHeight - 1);
+        const fill = Math.max(1, straight * barHeight);
+        context.fillStyle = extended ? `rgba(${accent}, 0.95)` : `rgba(${WHITE}, 0.45)`;
+        context.fillRect(x, barsY + barHeight - fill, barWidth, fill);
+        setFont(8);
+        context.textAlign = 'center';
+        context.fillStyle = `rgba(${WHITE}, 0.6)`;
+        context.fillText(finger[0].toUpperCase(), x + barWidth / 2, barsY + barHeight + 10);
+      });
+      // palm indicator: filled when the palm faces the camera
+      const palmX = barsX + barsWidth / 2;
+      const palmY = barsY + barHeight + 22;
+      context.strokeStyle = `rgba(${accent}, 0.9)`;
+      context.beginPath();
+      context.moveTo(palmX, palmY - 5);
+      context.lineTo(palmX + 5, palmY);
+      context.lineTo(palmX, palmY + 5);
+      context.lineTo(palmX - 5, palmY);
+      context.closePath();
+      if (hand.palmFacing) {
+        context.fillStyle = `rgba(${accent}, 0.9)`;
+        context.fill();
+      }
+      context.stroke();
       setFont(8);
-      context.textAlign = 'center';
       context.fillStyle = `rgba(${WHITE}, 0.6)`;
-      context.fillText(finger[0].toUpperCase(), x + barWidth / 2, barsY + barHeight + 10);
-    });
-    // palm indicator: filled when the palm faces the camera
-    const palmX = barsX + barsWidth / 2;
-    const palmY = barsY + barHeight + 22;
-    context.strokeStyle = `rgba(${accent}, 0.9)`;
-    context.beginPath();
-    context.moveTo(palmX, palmY - 5);
-    context.lineTo(palmX + 5, palmY);
-    context.lineTo(palmX, palmY + 5);
-    context.lineTo(palmX - 5, palmY);
-    context.closePath();
-    if (hand.palmFacing) {
-      context.fillStyle = `rgba(${accent}, 0.9)`;
-      context.fill();
-    }
-    context.stroke();
-    setFont(8);
-    context.fillStyle = `rgba(${WHITE}, 0.6)`;
-    context.fillText(hand.palmFacing ? 'PALM' : 'BACK', palmX, palmY + 15);
+      context.fillText(hand.palmFacing ? 'PALM' : 'BACK', palmX, palmY + 15);
 
-    // readouts under the bracket
-    const roll = Math.round((hand.roll * 180) / Math.PI);
-    const readoutY = Math.min(y1 + 14, height - 60);
-    setFont(9);
-    context.textAlign = 'left';
-    context.letterSpacing = '0.08em';
-    context.fillStyle = `rgba(${WHITE}, 0.55)`;
-    context.fillText(`X ${hand.x.toFixed(2)}  Y ${hand.y.toFixed(2)}`, x0, readoutY);
-    context.fillText(`ROLL ${roll >= 0 ? '+' : ''}${roll}°  ${hand.fingers?.count ?? 0}/5 UP`, x0, readoutY + 12);
-    context.letterSpacing = '0px';
+    });
+
+    powered(2, hand, area, () => {
+      // skeleton and joints: what the tracker sees
+      context.lineWidth = 1;
+      context.strokeStyle = `rgba(${accent}, 0.32)`;
+      context.beginPath();
+      for (const [a, b] of HAND_CONNECTIONS) {
+        context.moveTo(points[a].x, points[a].y);
+        context.lineTo(points[b].x, points[b].y);
+      }
+      context.stroke();
+      context.fillStyle = `rgba(${WHITE}, 0.7)`;
+      for (const point of points) context.fillRect(point.x - 1.5, point.y - 1.5, 3, 3);
+      context.strokeStyle = `rgba(${accent}, 0.85)`;
+      for (const index of [4, 8, 12, 16, 20]) {
+        context.beginPath();
+        context.arc(points[index].x, points[index].y, 4, 0, Math.PI * 2);
+        context.stroke();
+      }
+      // thumb contact: a ring where the thumb touches a fingertip
+      for (const [finger, tipIndex] of [['index', 8], ['middle', 12], ['ring', 16], ['pinky', 20]]) {
+        if (!hand.touching[finger]) continue;
+        const x = (points[4].x + points[tipIndex].x) / 2;
+        const y = (points[4].y + points[tipIndex].y) / 2;
+        context.strokeStyle = `rgba(${WHITE}, 0.95)`;
+        context.lineWidth = 1.5;
+        context.beginPath();
+        context.arc(x, y, 9, 0, Math.PI * 2);
+        context.stroke();
+        context.lineWidth = 1;
+      }
+
+    });
+
+    powered(3, hand, { x0, y0: y0 - 36, x1: x0 + 220, y1: y0 }, () => {
+      // header: a tag with the hand and its team, the gesture, the action
+      const side = hand.physical === 'left' ? 'L' : 'R';
+      const tag = typed(`${hand.id}-team`, `${side} ${teams[hand.id].name}`, nowMs);
+      setFont(10, 700);
+      context.letterSpacing = '0.1em';
+      const tagWidth = Math.ceil(context.measureText(tag).width) + 9;
+      context.fillStyle = `rgba(${accent}, 0.9)`;
+      context.fillRect(x0, y0 - 33, tagWidth, 15);
+      context.textAlign = 'left';
+      context.fillStyle = 'rgba(0, 0, 0, 1)';
+      context.fillText(tag, x0 + 4.5, y0 - 22);
+      context.letterSpacing = '0px';
+      const gesture = GESTURE_NAMES[hand.gesture] ?? hand.gesture.toUpperCase();
+      glowText(typed(`${hand.id}-gesture`, gesture, nowMs), x0 + tagWidth + 7, y0 - 21, WHITE, 0.95, 13,
+        { weight: 700, spacing: 0.2 });
+      if (state.action) {
+        glowText(typed(`${hand.id}-action`, `// ${state.action}`, nowMs), x0, y0 - 6, accent, 0.95, 10, { spacing: 0.16 });
+      }
+
+    });
+
+    powered(4, hand, area, () => {
+      // bracket
+      const arm = Math.min(HUD.bracket, (x1 - x0) / 3, (y1 - y0) / 3);
+      context.strokeStyle = `rgba(${accent}, 0.9)`;
+      context.lineWidth = 1.25;
+      context.beginPath();
+      for (const [x, y, dx, dy] of [[x0, y0, 1, 1], [x1, y0, -1, 1], [x1, y1, -1, -1], [x0, y1, 1, -1]]) {
+        context.moveTo(x + dx * arm, y);
+        context.lineTo(x, y);
+        context.lineTo(x, y + dy * arm);
+      }
+      // centre ticks on each side
+      const midX = (x0 + x1) / 2;
+      const midY = (y0 + y1) / 2;
+      context.moveTo(midX, y0 - 3); context.lineTo(midX, y0 + 3);
+      context.moveTo(midX, y1 - 3); context.lineTo(midX, y1 + 3);
+      context.moveTo(x0 - 3, midY); context.lineTo(x0 + 3, midY);
+      context.moveTo(x1 - 3, midY); context.lineTo(x1 + 3, midY);
+      context.stroke();
+
+    });
   }
 
   // view units -> CSS pixels
@@ -259,6 +317,7 @@ export function createHud(container, { hands, view, teams, controls, endOfLine }
   }
 
   function drawCharges() {
+    if (!endOfLine.hudOn) return;
     for (const id of ['left', 'right']) {
       const state = controls.states[id];
       const hand = hands[id];
@@ -272,39 +331,56 @@ export function createHud(container, { hands, view, teams, controls, endOfLine }
     }
   }
 
-  // END OF LINE, typed in the middle of the screen between two rules
+  // END OF LINE, typed in the dark in the middle of the screen between two
+  // rules; then switched off like an old TV: squashed to a bright line,
+  // the line shrinks to a dot, the dot fades.
   function drawEndOfLine(seconds) {
     const caption = endOfLine.caption();
     if (!caption) return;
     const x = view.width / 2;
     const y = view.height * 0.42;
     const accent = teams.left.cssRgb();
-    // a broken signal: the words flicker and now and then drop out for a frame
-    const flicker = hash(Math.floor(seconds * 24)) < 0.08 ? 0.25 : 0.88 + 0.12 * hash(Math.floor(seconds * 40) + 0.3);
-    const alpha = caption.alpha * flicker;
-    const shown = Math.floor(caption.text.length * caption.typed);
-    const text = caption.text.slice(0, shown) + (caption.typed < 1 || Math.floor(seconds * 3) % 2 ? '\u2588' : ' ');
     const size = Math.round(Math.min(64, view.width / 16));
     drawn.push([0, y - size * 1.6, view.width, size * 3.4]);
+    const middle = y - size * 0.1;
+    if (caption.squash >= 1) {
+      // the line and the dot
+      const p = 0.45 + 0.45 * caption.shrink + 0.1 * caption.dot;
+      collapseLine(x, middle, view.width * 0.32, p, WHITE);
+      return;
+    }
+    // a broken signal: the words flicker and now and then drop out for a frame
+    const flicker = hash(Math.floor(seconds * 24)) < 0.08 ? 0.25 : 0.88 + 0.12 * hash(Math.floor(seconds * 40) + 0.3);
+    const alpha = flicker * (1 + caption.squash);
+    const shown = Math.floor(caption.text.length * caption.typed);
+    const text = caption.text.slice(0, shown) + (caption.typed < 1 || Math.floor(seconds * 3) % 2 ? '\u2588' : ' ');
+    context.save();
+    if (caption.squash > 0) {
+      context.translate(x, middle);
+      context.scale(1, Math.max(0.03, 1 - caption.squash));
+      context.translate(-x, -middle);
+    }
     context.font = `200 ${size}px "Helvetica Neue", "Avenir Next", "Segoe UI", Arial, sans-serif`;
     context.letterSpacing = '0.5em';
     context.textAlign = 'center';
     const fullWidth = context.measureText(caption.text).width;
-    context.shadowColor = `rgba(${accent}, ${0.9 * alpha})`;
+    context.shadowColor = `rgba(${accent}, ${Math.min(1, 0.9 * alpha)})`;
     context.shadowBlur = 18;
-    context.fillStyle = `rgba(${WHITE}, ${alpha})`;
+    context.fillStyle = `rgba(${WHITE}, ${Math.min(1, alpha)})`;
     context.fillText(text, x + size * 0.25, y + size * 0.35);
     context.shadowBlur = 0;
     context.letterSpacing = '0px';
     // the rules draw out from the middle as the words are typed
     const reach = (fullWidth / 2 + size) * Math.min(1, caption.typed * 1.4);
-    context.fillStyle = `rgba(${accent}, ${0.85 * alpha})`;
+    context.fillStyle = `rgba(${accent}, ${Math.min(1, 0.85 * alpha)})`;
     for (const offset of [-size * 0.95, size * 0.75]) {
       context.fillRect(x - reach, y + offset, reach * 2, 1);
       context.fillRect(x - reach, y + offset - 3, 1, 7);
       context.fillRect(x + reach - 1, y + offset - 3, 1, 7);
     }
-    glowText('// SYSTEM HALT', x, y + size * 1.25, accent, 0.8 * alpha, 11, { align: 'center', spacing: 0.4 });
+    glowText('// SYSTEM HALT', x, y + size * 1.25, accent, Math.min(1, 0.8 * alpha), 11, { align: 'center', spacing: 0.4 });
+    context.restore();
+    if (caption.squash > 0.5) collapseLine(x, middle, view.width * 0.32, 0.3, WHITE);
   }
 
   // a faint hash per time step, for flicker and glitches
@@ -316,6 +392,12 @@ export function createHud(container, { hands, view, teams, controls, endOfLine }
   let lastMs = performance.now();
   return {
     resize,
+    // a fresh Grid: nothing left on the HUD from before
+    reset() {
+      labels.clear();
+      boxes.left = null;
+      boxes.right = null;
+    },
     draw(nowMs, seconds) {
       const dt = Math.min(0.1, Math.max(0.001, (nowMs - lastMs) / 1000));
       lastMs = nowMs;

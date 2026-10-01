@@ -9,11 +9,13 @@
 // colour of the hand that draws it. Walls fade after a few seconds, the
 // oldest go first when there is too much, thrown discs bounce off them
 // (segments() and pulse()), and derezz waves and light batons break them
-// (shatterWhere()); a freshly broken end glows for a moment.
+// (shatterWhere()); a freshly broken end glows for a moment. When the Grid
+// powers down, the walls go out run by run (powerDown()).
 import * as THREE from 'three';
 import { additiveMaterial, quadIndices, uploadPrefix } from './gl.js';
 import { createRibbon } from './ribbon.js';
 import { smoothstep } from './filters.js';
+import { lightPower } from './endofline.js';
 
 export const WALL = {
   height: 0.052,            // view units (the frame is 1 unit tall)
@@ -200,6 +202,13 @@ export function createLightWalls(view, teams) {
         else turn(trail, dominant.x, dominant.y, now);
         return;
       }
+      // a fingertip that has clearly gone off to the side turns even a short
+      // run (only small sideways moves wait for the run to grow, against jitter)
+      if (run >= 1e-3 && Math.abs(across) > WALL.turnOffset) {
+        const sign = Math.sign(across);
+        turn(trail, side.x * sign, side.y * sign, now);
+        return;
+      }
     } else {
       const movingSideways = Math.abs(across) > WALL.quickTurnOffset
         && Math.sign(speedAcross) === Math.sign(across)
@@ -288,6 +297,46 @@ export function createLightWalls(view, teams) {
     return out;
   }
 
+  // The Grid powers down: every straight run of wall goes out at the time
+  // `offTime(point)` gives for its middle, after a last flicker.
+  function powerDown(offTime) {
+    for (const trail of trails) {
+      const samples = trail.samples.filter((sample) => !sample.gone);
+      let run = [];
+      const close = () => {
+        if (!run.length) return;
+        const middle = run[Math.floor(run.length / 2)];
+        const offAt = offTime(middle);
+        const seed = Math.random() * 100;
+        for (const sample of run) {
+          sample.offAt = offAt;
+          sample.offSeed = seed;
+        }
+        run = [];
+      };
+      for (let index = 0; index < samples.length; index++) {
+        const sample = samples[index];
+        const previous = samples[index - 1];
+        const before = samples[index - 2];
+        if (previous && before) {
+          const horizontal = Math.abs(sample.y - previous.y) < 1e-6;
+          const wasHorizontal = Math.abs(previous.y - before.y) < 1e-6;
+          // a corner belongs to both runs; the new run starts after it
+          if (horizontal !== wasHorizontal) close();
+        }
+        run.push(sample);
+      }
+      close();
+    }
+  }
+
+  // a fresh Grid: no walls at all
+  function clear() {
+    trails.length = 0;
+    pulses.length = 0;
+    livingSamples = 0;
+  }
+
   // a flash that runs both ways along a wall from where a disc struck it
   function pulse(trail, along, now) {
     pulses.push({ trail, along, start: now });
@@ -340,7 +389,7 @@ export function createLightWalls(view, teams) {
     const age = now - sample.born;
     const fade = 1 - smoothstep(WALL.fadeStart, WALL.fadeEnd, age);
     const cap = sample.dieAt === Infinity ? 1 : Math.max(0, (sample.dieAt - now) / WALL.capFade);
-    return fade * cap;
+    return fade * cap * lightPower(sample.offAt, now, sample.offSeed);
   }
 
   function rebuild(now) {
@@ -420,6 +469,8 @@ export function createLightWalls(view, teams) {
     shatter,
     shatterWhere,
     segments,
+    powerDown,
+    clear,
     colorOf(sample) {
       return teams.colors[sample.team];
     },

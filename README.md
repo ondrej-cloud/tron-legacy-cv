@@ -43,7 +43,7 @@ is uploaded anywhere.
 | **Flick** while holding a disc | Throws it. It ricochets off the screen edges, your walls, batons and the other disc, then comes back |
 | 👍 **Thumbs up** | Rezzes a light cycle that drops onto the Grid and rides off, leaving its own glass wall |
 | ✊ **Hold a fist** | A ring charges for half a second, then everything around that hand derezzes into voxels |
-| ✊✊ **Two fists together** | END OF LINE: the whole Grid derezzes and shuts down, then reboots |
+| ✊✊ **Two fists together** | END OF LINE: the Grid powers down light by light, the words are typed in the dark, and you're back at the start screen |
 | ✌️ **Peace** | The digitizing laser sweeps over you and turns your outline into light |
 | 🤙 **Shaka** (thumb + pinky) | A light baton in your hand: swing it to cut walls and bat discs away. Grab its other end with your other hand and pull apart, and it splits into two handles and rezzes a light cycle |
 | 🖐️🖐️ **Both palms open**, facing the camera | Opens a portal of light between your hands and lights up the Grid |
@@ -59,7 +59,7 @@ is uploaded anywhere.
   </tr>
   <tr>
     <td><img src="media/derezz.jpg" alt="A held fist with a charging ring derezzing the nearby part of a wall into voxels"><br><b>Hold a fist:</b> a local derezz</td>
-    <td><img src="media/end-of-line.jpg" alt="END OF LINE typed in the centre while everything derezzes into voxels"><br><b>Two fists:</b> END OF LINE</td>
+    <td><img src="media/end-of-line.jpg" alt="END OF LINE typed in the dark after the Grid powered down"><br><b>Two fists:</b> END OF LINE</td>
   </tr>
   <tr>
     <td><img src="media/light-cycles.jpg" alt="A cyan and an orange light cycle riding on the Grid"><br><b>Thumbs up:</b> light cycles on the Grid</td>
