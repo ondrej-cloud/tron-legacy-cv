@@ -216,6 +216,45 @@ body.intro-open .sd-ui { visibility: hidden; }
 
 @keyframes intro-blink { 50% { opacity: 0.35; } }
 
+/* music credit: a quiet readout in the top left corner, opposite the system
+   log, once the manual is up; in the column on smaller screens */
+
+.intro-credit {
+  position: absolute;
+  top: 18px;
+  left: 24px;
+  z-index: 1;
+  max-width: calc(100% - 360px);
+  margin: 0;
+  font: 400 10.5px/1.75 var(--mono-font);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(214, 248, 255, 0.4);
+}
+
+.intro-credit a {
+  color: rgba(214, 248, 255, 0.62);
+  text-decoration: none;
+  border-bottom: 1px dotted rgba(111, 243, 255, 0.35);
+}
+
+.intro-credit a:hover,
+.intro-credit a:focus-visible {
+  outline: none;
+  color: var(--cyan);
+  border-bottom-color: var(--cyan);
+}
+
+.intro-credit-key { display: block; }
+
+.intro-credit kbd {
+  padding: 0 4px;
+  margin-right: 4px;
+  border: 1px solid rgba(111, 243, 255, 0.35);
+  font: inherit;
+  color: rgba(214, 248, 255, 0.7);
+}
+
 /* The controls card alone sets the layout; the gate sits over its top
    edge. So nothing moves when the gate changes state or gives way to the card. */
 
@@ -656,6 +695,17 @@ body.intro-open .sd-ui { visibility: hidden; }
   }
   /* in the column the empty log would push the camera question down */
   .intro:not(.is-booting) .intro-log { display: none; }
+  .intro-credit {
+    position: relative;
+    top: auto;
+    left: auto;
+    order: 4;
+    max-width: none;
+    margin-top: clamp(12px, 2.5vh, 22px);
+    text-align: center;
+    text-wrap: balance;
+    flex-shrink: 0;
+  }
   .intro-head { order: 0; }
   .intro-stage { order: 2; }
   .intro-enter { order: 3; }
@@ -698,6 +748,9 @@ body.intro-open .sd-ui { visibility: hidden; }
     background: rgba(0, 3, 5, 0.95);
     box-shadow: 0 -1px 0 rgba(111, 243, 255, 0.18), 0 -18px 18px rgba(0, 3, 5, 0.85);
   }
+  /* the credit sits under the last card, above the pinned way in */
+  .intro-credit { order: 3; margin: 14px 0 4px; font-size: 9.5px; letter-spacing: 0.06em; }
+  .intro-enter { order: 4; }
   .intro-ring { width: 46px; height: 46px; }
   .intro-palms { gap: 12px; }
   .intro-prompt { font-size: 16px; }

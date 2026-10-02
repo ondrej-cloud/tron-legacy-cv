@@ -2,6 +2,7 @@
 import { CONTROLS } from './intro-glyphs.js';
 import { TITLE_FONT } from './intro-title.js';
 
+const MUSIC_CREDIT_URL = 'https://pixabay.com/music/synthwave-the-arcade-city-cinematic-hybrid-music-519731/';
 const FONTS_URL = 'https://fonts.googleapis.com/css2?family=Michroma&family=Rajdhani:wght@500;600;700&display=swap';
 
 let fontsReady = null;
@@ -72,6 +73,11 @@ export function buildDom() {
             <span class="label"></span><span class="leader"></span><span class="value"></span>
           </div>`).join('')}
       </div>
+      <p class="intro-credit" data-at="manual">
+        Music · <a href="${MUSIC_CREDIT_URL}" target="_blank" rel="noopener noreferrer">The Arcade City by
+        Luis_Humanoide (Pixabay)</a>
+        <span class="intro-credit-key"><kbd>N</kbd> mutes the music</span>
+      </p>
       <div class="intro-stage">
         <section class="intro-gate" aria-labelledby="intro-gate-heading" aria-describedby="intro-gate-text">
           <p class="intro-gate-label"></p>

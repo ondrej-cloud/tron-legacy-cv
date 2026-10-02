@@ -51,9 +51,13 @@ export function lightPower(offAt, now, seed = 0) {
 export const POWER_DOWN_LENGTH = END_OF_LINE.text.start + END_OF_LINE.text.typing + END_OF_LINE.text.hold
   + END_OF_LINE.text.squash + END_OF_LINE.text.shrink + END_OF_LINE.text.dot;
 
-// `onStart()` is called as the Grid starts to power down.
-export function createEndOfLine({ log, onStart = () => {} }) {
+// `onStart()` is called as the Grid starts to power down, `onKey()` for
+// every letter of END OF LINE as it is typed, `onCollapse()` as the words
+// switch off.
+export function createEndOfLine({ log, onStart = () => {}, onKey = () => {}, onCollapse = () => {} }) {
   let started = null;      // when the fists fired, while the Grid is down
+  let typedSoFar = 0;      // letters of the words typed so far
+  let collapsed = false;
   let booted = -Infinity;  // when the Grid last booted
   let origin = { x: 0, y: 0 };
   let now = 0;
@@ -70,6 +74,8 @@ export function createEndOfLine({ log, onStart = () => {} }) {
       started = now;
       origin = { x: at.x, y: at.y };
       count++;
+      typedSoFar = 0;
+      collapsed = false;
       log('end of line');
       onStart();
     },
@@ -80,6 +86,14 @@ export function createEndOfLine({ log, onStart = () => {} }) {
     },
     update(seconds) {
       now = seconds;
+      const caption = this.caption();
+      if (!caption) return;
+      const shown = Math.floor(caption.text.length * caption.typed);
+      for (; typedSoFar < shown; typedSoFar++) if (caption.text[typedSoFar] !== ' ') onKey();
+      if (caption.squash > 0 && !collapsed) {
+        collapsed = true;
+        onCollapse();
+      }
     },
     // the Grid is down (from the fists until it boots again)
     get active() {

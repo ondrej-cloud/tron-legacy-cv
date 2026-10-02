@@ -20,7 +20,8 @@
 // `host.returnToIntro()` hands the screen back to the intro (it plays its
 // "returning" version, without the camera gate); the effect is paused until
 // the user enters again, then gets onEnter(). `host.music.fadeOut(seconds)`
-// fades the background music, e.g. while the Grid powers down.
+// stops the background music like a tape, with a power-down sound, and
+// `host.sfx` has the other sound effects (key(), crtOff()); see music.js.
 //
 // The effect layer is composited with `mix-blend-mode: screen`, so light adds
 // onto the camera image and dark areas leave it untouched. Only the active
@@ -79,6 +80,7 @@ else music.play('grid');
 
 const host = {
   music,
+  sfx: music.sfx,
   returnToIntro() {
     if (!introRunning) showIntro({ returning: true });
   },

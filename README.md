@@ -4,16 +4,13 @@
   <img src="media/portal.jpg" alt="Both open palms facing the camera open a beam of light between the hands, with the Grid lighting up below" width="820">
 </p>
 
-I love TRON: Legacy. The Grid, the light cycles, the identity discs, the Daft Punk soundtrack: I've rewatched
-it more times than I'd like to admit, and I always wanted to throw an identity disc myself. So I built the
-next best thing. **Tron Legacy CV** turns your webcam into the Grid: you draw glass light walls with your
-finger, summon a disc and throw it so it ricochets off the walls you drew, pull a baton apart into a light
-cycle, get digitized by the laser and shut the whole Grid down with two fists, all with hand gestures, live
-in the browser.
+I'm a big fan of TRON: Legacy and wanted to build a computer vision project, so I made this. Tron Legacy CV
+puts the Grid over your webcam: you draw light walls with your finger, throw an identity disc that bounces off
+them, pull a baton apart into a light cycle, get digitized by the laser and shut the Grid down with two fists.
+Everything is controlled with hand gestures and runs live in the browser.
 
-It's a computer vision project at heart: MediaPipe tracks 21 landmarks on each hand, and everything you see is
-driven by a gesture recognizer I built on top of those landmarks. It runs entirely in your browser. Nothing
-is uploaded anywhere.
+Under the hood, MediaPipe tracks 21 landmarks on each hand, and everything you see is driven by a gesture
+recognizer built on top of those landmarks. It all runs in your browser and nothing is uploaded anywhere.
 
 **▶ Live demo:** https://tron-legacy-cv.vercel.app (allow the camera, or watch the scripted demo without one)
 
@@ -32,6 +29,9 @@ is uploaded anywhere.
   measurements of each finger and the tracker's pace next to it.
 - **Works without a camera**: a scripted demo runs through every gesture with procedural hands that go
   through the exact same recognition pipeline.
+- **Music and sound**: the soundtrack plays muffled behind the intro, opens up when you enter the Grid and
+  slows to a stop like a tape at END OF LINE; the transition and power-down sound effects are synthesised
+  with the Web Audio API.
 
 ## What you can do
 
@@ -145,6 +145,7 @@ On macOS you can also double-click `Start.command`.
 | `F` | fullscreen |
 | `H` | hide the UI |
 | `G` | gesture tuning panel |
+| `N` | music on/off |
 | `D` | scripted demo on/off |
 | `M` / `C` | mouse / camera input |
 
@@ -173,6 +174,7 @@ src/
   gestures.js           finger analysis, gesture classifier, thresholds, procedural hand
   segmentation.js       selfie segmentation for the digitizing laser
   tuning.js             live tuning panel (G)
+  music.js, sfx.js      soundtrack (crossfaded loop, intro/Grid filter, tape stop) and synthesised effects
   ui.js                 status and keyboard shortcuts
   intro*.js, intro.css  camera gate, boot sequence, controls, entering the Grid
   effects/tron/         glass walls, discs, baton, cycles, voxels, portal, Grid, HUD, digitize,
@@ -180,6 +182,7 @@ src/
 tools/
   test-gestures.mjs     recognition tests
   shot.mjs              headless screenshots
+audio/                  the soundtrack
 media/                  README images
 ```
 
@@ -192,6 +195,9 @@ landmarks until it felt reliable.
 
 Built with [Three.js](https://threejs.org) and [MediaPipe](https://ai.google.dev/edge/mediapipe/solutions/guide)
 (Hand Landmarker and Image Segmenter).
+
+Music: [The Arcade City (Cinematic Hybrid Music)](https://pixabay.com/music/synthwave-the-arcade-city-cinematic-hybrid-music-519731/)
+by luis_humanoide, used under the [Pixabay Content License](https://pixabay.com/service/license-summary/).
 
 *This is an unofficial fan project. TRON and TRON: Legacy are trademarks of Disney; this project isn't
 affiliated with or endorsed by Disney.*

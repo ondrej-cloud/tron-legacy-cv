@@ -495,6 +495,8 @@ export function runIntro({ hands, onDone, returning = false }) {
       return;
     }
     if (phase !== 'boot') return;
+    // N mutes the music (music.js); a link keeps its own Enter
+    if (event.key.toLowerCase() === 'n' || event.target instanceof HTMLAnchorElement) return;
     const confirm = event.key === 'Enter' || event.key === ' ';
     if (!ready) {
       if (event.key === 'Tab' || event.key === 'Shift') return;

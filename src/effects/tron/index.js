@@ -82,8 +82,14 @@ export function createEffect({ container, hands, host }) {
   const discs = createDiscs({ view, teams, walls, batons, stage, voxels, flashes, log });
   const cycles = createCycles({ view, teams, stage, voxels, flashes, log });
   const digitizer = createDigitizer({ hands, view, voxels, flashes, log });
-  // the music dies with the lights (the host starts the Grid track again on entering)
-  const endOfLine = createEndOfLine({ log, onStart: () => host?.music?.fadeOut(POWER_DOWN_LENGTH) });
+  // the music dies with the lights (the host starts the Grid track again on
+  // entering), the words are typed with key clicks and switch off with a click
+  const endOfLine = createEndOfLine({
+    log,
+    onStart: () => host?.music?.fadeOut(POWER_DOWN_LENGTH),
+    onKey: () => host?.sfx?.key(),
+    onCollapse: () => host?.sfx?.crtOff(),
+  });
   scene.add(stage.group, digitizer.group, cycles.group, walls.object, discs.group, batons.group, voxels.mesh, flashes.group);
   const controls = createControls({ hands, view, teams, walls, discs, cycles, batons, digitizer, endOfLine,
     voxels, flashes, stage, log });
