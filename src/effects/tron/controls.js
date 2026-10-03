@@ -532,9 +532,13 @@ export function createControls({ hands, view, teams, walls, discs, cycles, baton
     if (grab?.latched && grab.holder === hand.id) return 'PULL APART';
     const disc = discs.ownedBy(hand.id);
     if (digitizer.active && time - state.lastDigitize < 5) return 'DIGITIZING';
-    if (time - state.lastTeamSwitch < 1.2) return `PROGRAM ${teams[hand.id].name}`;
-    if (time - state.lastDerezz < 1.2) return 'DEREZZ';
-    if (time - state.lastLaunch < 1.2) return 'LIGHT CYCLE';
+    // of the one-shot actions in the last moment, the latest
+    const latest = [
+      [state.lastTeamSwitch, `PROGRAM ${teams[hand.id].name}`],
+      [state.lastDerezz, 'DEREZZ'],
+      [state.lastLaunch, 'LIGHT CYCLE'],
+    ].filter(([at]) => time - at < 1.2).sort((a, b) => b[0] - a[0])[0];
+    if (latest) return latest[1];
     if (portal.on) return 'PORTAL OPEN';
     if (state.trail) return 'LIGHT WALL';
     if (disc?.state === 'summoning') return 'IDENTITY DISC';

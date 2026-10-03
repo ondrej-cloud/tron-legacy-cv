@@ -3,6 +3,7 @@ import { CONTROLS } from './intro-glyphs.js';
 import { TITLE_FONT } from './intro-title.js';
 
 const MUSIC_CREDIT_URL = 'https://pixabay.com/music/synthwave-the-arcade-city-cinematic-hybrid-music-519731/';
+const CYCLE_CREDIT_URL = 'https://dreamloft3d.itch.io/tron-light-cycle';
 const FONTS_URL = 'https://fonts.googleapis.com/css2?family=Michroma&family=Rajdhani:wght@500;600;700&display=swap';
 
 let fontsReady = null;
@@ -76,6 +77,8 @@ export function buildDom() {
       <p class="intro-credit" data-at="manual">
         Music · <a href="${MUSIC_CREDIT_URL}" target="_blank" rel="noopener noreferrer">The Arcade City by
         Luis_Humanoide (Pixabay)</a>
+        <span class="intro-credit-model">Light cycle model · <a href="${CYCLE_CREDIT_URL}" target="_blank"
+        rel="noopener noreferrer">Dreamloft3D (CC BY 4.0)</a></span>
         <span class="intro-credit-key"><kbd>N</kbd> mutes the music</span>
       </p>
       <div class="intro-stage">

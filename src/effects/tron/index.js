@@ -8,11 +8,14 @@
 // holographic HUD shows what the hand tracker sees (the rules are in
 // controls.js).
 //
-// The scene is flat, in "view units": the frame is 1 unit tall, x runs from
-// -aspect/2 to +aspect/2, y points up, (0, 0) is the centre of the screen.
-// Everything is additive light on black (the host screen-blends the layer
-// over the camera), and bloom haloes the thin bright lines. The HUD is a 2D
-// canvas on top, so its text and hairlines stay crisp.
+// Most of the scene is flat, in "view units": the frame is 1 unit tall, x
+// runs from -aspect/2 to +aspect/2, y points up, (0, 0) is the centre of the
+// screen. The light cycles and their jetwalls are 3D, on a perspective view
+// of the Grid floor that lines up with the drawn one (grid3d.js); they are
+// rendered between the floor and the flat effects. Everything is light on
+// black (the host screen-blends the layer over the camera), and bloom haloes
+// the thin bright lines. The HUD is a 2D canvas on top, so its text and
+// hairlines stay crisp.
 import * as THREE from 'three';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
@@ -20,6 +23,7 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { createTeams } from './palette.js';
 import { createStage } from './stage.js';
+import { createGrid3d } from './grid3d.js';
 import { createLightWalls } from './walls.js';
 import { createVoxels } from './voxels.js';
 import { createFlashes } from './flashes.js';
@@ -64,7 +68,10 @@ export function createEffect({ container, hands, host }) {
     pixelRatio,
   };
   const camera = new THREE.OrthographicCamera(-0.5, 0.5, 0.5, -0.5, -10, 10);
-  const scene = new THREE.Scene();
+  // flat layers behind and in front of the 3D one
+  const backScene = new THREE.Scene();
+  const frontScene = new THREE.Scene();
+  const grid3d = createGrid3d(renderer);
 
   let seconds = 0;
   const events = [];   // recent actions, for the stats
@@ -79,8 +86,8 @@ export function createEffect({ container, hands, host }) {
   const voxels = createVoxels();
   const flashes = createFlashes(view);
   const batons = createBatons({ view, walls, voxels, flashes, log });
-  const discs = createDiscs({ view, teams, walls, batons, stage, voxels, flashes, log });
-  const cycles = createCycles({ view, teams, stage, voxels, flashes, log });
+  const cycles = createCycles({ view, teams, stage, grid3d, renderer, voxels, flashes, log });
+  const discs = createDiscs({ view, teams, walls, cycles, batons, stage, voxels, flashes, log });
   const digitizer = createDigitizer({ hands, view, voxels, flashes, log });
   // the music dies with the lights (the host starts the Grid track again on
   // entering), the words are typed with key clicks and switch off with a click
@@ -90,14 +97,22 @@ export function createEffect({ container, hands, host }) {
     onKey: () => host?.sfx?.key(),
     onCollapse: () => host?.sfx?.crtOff(),
   });
-  scene.add(stage.group, digitizer.group, cycles.group, walls.object, discs.group, batons.group, voxels.mesh, flashes.group);
+  backScene.add(stage.group, digitizer.group);
+  grid3d.scene.add(cycles.group3d);
+  frontScene.add(cycles.group, walls.object, discs.group, batons.group, voxels.mesh, flashes.group);
   const controls = createControls({ hands, view, teams, walls, discs, cycles, batons, digitizer, endOfLine,
     voxels, flashes, stage, log });
   const hud = createHud(container, { hands, view, teams, controls, endOfLine });
   const demo = createDemo();
 
   const composer = new EffectComposer(renderer);
-  composer.addPass(new RenderPass(scene, camera));
+  composer.addPass(new RenderPass(backScene, camera));
+  // the flat layers don't touch the depth buffer, so the 3D pass finds it clear
+  for (const [layer, layerCamera] of [[grid3d.scene, grid3d.camera], [frontScene, camera]]) {
+    const pass = new RenderPass(layer, layerCamera);
+    pass.clear = false;
+    composer.addPass(pass);
+  }
   const { strength, radius, threshold } = RENDER.bloom;
   composer.addPass(new UnrealBloomPass(new THREE.Vector2(1, 1), strength, radius, threshold));
   composer.addPass(new OutputPass());
@@ -201,6 +216,7 @@ export function createEffect({ container, hands, host }) {
       flashes.update(seconds);
       stage.update(seconds, controls.portal, controls.tethers, cycles.lights(), endOfLine.light());
       // after the stage, so the cycles are projected with this frame's floor
+      grid3d.update(seconds, view.aspect, stage.vanish);
       cycles.draw();
     },
 
@@ -223,6 +239,7 @@ export function createEffect({ container, hands, host }) {
         discs: discs.list.map((disc) => `${disc.owner}:${disc.state}`).join(' '),
         discCounts: { ...discs.counts },
         cycles: cycles.active,
+        cycleModel: cycles.model,
         cycleCounts: { ...cycles.counts },
         batons: { ...batons.counts, cycles: controls.counts.batonCycles },
         digitize: { active: digitizer.active, count: digitizer.count, segmenter: digitizer.segmenterStatus,

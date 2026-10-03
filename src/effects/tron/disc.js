@@ -1,11 +1,11 @@
 // Identity disc: an "ok" hand summons it, it stays at that palm, and a fast
 // flick throws it. In flight it spins and leaves a light trail; it ricochets
-// off the edges of the frame and off the light walls (a swept test, so a
-// fast disc can't tunnel through a thin wall), two thrown discs bounce off
-// each other, and a light baton bats a disc away. Once the ricochets settle
-// it homes back to its owner and is caught by an open hand (a closed hand
-// makes it circle and wait). If the owner's hand is gone, the disc fades
-// out. Each disc has its hand's colour.
+// off the edges of the frame, off the light walls and the light cycles'
+// jetwalls (a swept test, so a fast disc can't tunnel through a thin wall),
+// two thrown discs bounce off each other, and a light baton bats a disc
+// away. Once the ricochets settle it homes back to its owner and is caught
+// by an open hand (a closed hand makes it circle and wait). If the owner's
+// hand is gone, the disc fades out. Each disc has its hand's colour.
 import * as THREE from 'three';
 import { additiveMaterial, uploadPrefix } from './gl.js';
 import { clamp, easeTowards } from './filters.js';
@@ -126,7 +126,8 @@ const trailFragment = /* glsl */`
 `;
 
 // `log(name)` records an action for the stats.
-export function createDiscs({ view, teams, walls, batons, stage, voxels, flashes, log }) {
+// cycles: optional, their jetwalls stop discs too
+export function createDiscs({ view, teams, walls, cycles = null, batons, stage, voxels, flashes, log }) {
   const group = new THREE.Group();
   const plane = new THREE.PlaneGeometry(2, 2);
   const slots = [];
@@ -367,13 +368,14 @@ export function createDiscs({ view, teams, walls, batons, stage, voxels, flashes
   // earliest crossing this frame wins; the velocity is reflected off the
   // segment, so curved walls bounce as they should.
   function bounceOffWalls(disc, fromX, fromY, segments) {
-    const extrude = walls.extrude;
     const rx = disc.radius * DISC.hitReach;
     const ry = disc.radius * disc.squash * DISC.hitReach;
     const moveX = disc.x - fromX;
     const moveY = disc.y - fromY;
     let best = null;
     for (const segment of segments) {
+      // drawn walls all rise the same way on screen, jetwalls in perspective
+      const extrude = segment.extrude ?? walls.extrude;
       const ax = segment.x0 + extrude.x / 2;
       const ay = segment.y0 + extrude.y / 2;
       const dx = segment.x1 - segment.x0;
@@ -416,7 +418,7 @@ export function createDiscs({ view, teams, walls, batons, stage, voxels, flashes
     flashes.spawn({ x: contact.x, y: contact.y, size: 0.11, duration: 0.4, color: colorOf(disc), glint: 1 });
     sparks(contact.x, contact.y, nx * side, ny * side, colorOf(disc), 10);
     sparks(contact.x, contact.y, nx * side, ny * side, wallColor, 8, 0.7);
-    walls.pulse(segment.trail, segment.along0 + onWall, now);
+    (segment.owner ?? walls).pulse(segment.trail, segment.along0 + onWall, now, segment);
   }
 
   // A light baton bats a flying disc away (one on its way home passes): the
@@ -599,7 +601,8 @@ export function createDiscs({ view, teams, walls, batons, stage, voxels, flashes
     // hands: { left, right } each { visible, palm, open, size, roll } in view units
     update(time, dt, hands) {
       now = time;
-      const wallSegments = discs.some((disc) => disc.state === 'flying') ? walls.segments(now) : [];
+      const wallSegments = discs.some((disc) => disc.state === 'flying')
+        ? [...walls.segments(now), ...(cycles ? cycles.segments(now) : [])] : [];
       for (const disc of discs) {
         disc.stateTime += dt;
         disc.flash = Math.max(0, disc.flash - dt * 2.5);

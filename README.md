@@ -41,7 +41,7 @@ recognizer built on top of those landmarks. It all runs in your browser and noth
 | 🤘 **Rock** (index + pinky) | Switches that hand's colour between TRON cyan and CLU orange |
 | 👌 **OK** | Summons an identity disc into that hand |
 | **Flick** while holding a disc | Throws it. It ricochets off the screen edges, your walls, batons and the other disc, then comes back |
-| 👍 **Thumbs up** | Rezzes a light cycle that drops onto the Grid and rides off, leaving its own glass wall |
+| 👍 **Thumbs up** | Rezzes a 3D light cycle (wireframe first, then solid) that drops onto the Grid and rides off, leaving its jetwall behind |
 | ✊ **Hold a fist** | A ring charges for half a second, then everything around that hand derezzes into voxels |
 | ✊✊ **Two fists together** | END OF LINE: the Grid powers down light by light, the words are typed in the dark, and you're back at the start screen |
 | ✌️ **Peace** | The digitizing laser sweeps over you and turns your outline into light |
@@ -62,7 +62,7 @@ recognizer built on top of those landmarks. It all runs in your browser and noth
     <td><img src="media/end-of-line.jpg" alt="END OF LINE typed in the dark after the Grid powered down"><br><b>Two fists:</b> END OF LINE</td>
   </tr>
   <tr>
-    <td><img src="media/light-cycles.jpg" alt="A cyan and an orange light cycle riding on the Grid"><br><b>Thumbs up:</b> light cycles on the Grid</td>
+    <td><img src="media/light-cycles.jpg" alt="A cyan and an orange 3D light cycle riding on the Grid with jetwalls behind them"><br><b>Thumbs up:</b> light cycles and their jetwalls</td>
     <td><img src="media/digitize.jpg" alt="The digitizing laser turning a person's silhouette into an orange grid of light"><br><b>Peace:</b> the digitizing laser (here on a synthetic test video)</td>
   </tr>
   <tr>
@@ -70,7 +70,7 @@ recognizer built on top of those landmarks. It all runs in your browser and noth
     <td><img src="media/baton-split.jpg" alt="The other hand pulling the baton apart into two handles as the wheel rings of a cycle bloom between them"><br>Grab the other end and pull: the baton splits</td>
   </tr>
   <tr>
-    <td><img src="media/baton-cycle.jpg" alt="A wireframe light cycle rezzing with glowing wheel rings"><br>…and a light cycle rezzes between your hands</td>
+    <td><img src="media/baton-cycle.jpg" alt="A light cycle with glowing cyan wheels rezzed between the hands"><br>…and a light cycle rezzes between your hands</td>
     <td><img src="media/intro.jpg" alt="The intro screen with the nine controls listed next to animated hand glyphs"><br>The intro, with the controls</td>
   </tr>
 </table>
@@ -177,12 +177,13 @@ src/
   music.js, sfx.js      soundtrack (crossfaded loop, intro/Grid filter, tape stop) and synthesised effects
   ui.js                 status and keyboard shortcuts
   intro*.js, intro.css  camera gate, boot sequence, controls, entering the Grid
-  effects/tron/         glass walls, discs, baton, cycles, voxels, portal, Grid, HUD, digitize,
-                        END OF LINE, demo
+  effects/tron/         glass walls, discs, baton, 3D light cycles and jetwalls, voxels, portal,
+                        Grid, HUD, digitize, END OF LINE, demo
 tools/
   test-gestures.mjs     recognition tests
   shot.mjs              headless screenshots
 audio/                  the soundtrack
+models/                 3D models (glTF) and models.json, the list the app loads from
 media/                  README images
 ```
 
@@ -195,6 +196,9 @@ landmarks until it felt reliable.
 
 Built with [Three.js](https://threejs.org) and [MediaPipe](https://ai.google.dev/edge/mediapipe/solutions/guide)
 (Hand Landmarker and Image Segmenter).
+
+Light cycle model: [Tron Light Cycle](https://dreamloft3d.itch.io/tron-light-cycle) by Dreamloft3D, licensed under
+[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
 
 Music: [The Arcade City (Cinematic Hybrid Music)](https://pixabay.com/music/synthwave-the-arcade-city-cinematic-hybrid-music-519731/)
 by luis_humanoide, used under the [Pixabay Content License](https://pixabay.com/service/license-summary/).

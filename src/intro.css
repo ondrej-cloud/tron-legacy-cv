@@ -245,7 +245,7 @@ body.intro-open .sd-ui { visibility: hidden; }
   border-bottom-color: var(--cyan);
 }
 
-.intro-credit-key { display: block; }
+.intro-credit-key, .intro-credit-model { display: block; }
 
 .intro-credit kbd {
   padding: 0 4px;

@@ -19,8 +19,8 @@
 //                discs go: they collide mid-air (~12.4) and come back
 //   14.8 - 15.4  both fists held, far apart: each derezzes the disc in it
 //   15.7 - 15.8  thumbs up, right then left: two light cycles rezz in the air
-//                (rings, construction sweep, wireframe, solid: ~1.7 s), drop
-//                and ride off in curves
+//                (rings, holographic sweep, solid, rims: ~1.7 s), drop and
+//                ride off in 90° turns with jetwalls behind them (~18.0 - 22.8)
 //         20.3   right hand peace: the digitizing laser (20.8 - 24.6)
 //   24.9 - 25.9  right hand draws a wall
 //         25.5   left hand makes "ok": a cyan disc
@@ -31,7 +31,7 @@
 //   31.7 - 32.2  left hand comes to the baton's free end: GRAB (~32.4)
 //   32.6 - 33.6  the hands pull apart: the bar fills, the baton splits into its
 //                two handles and a big light cycle rezzes between the hands
-//                (~33.1 - 34.8), then drops and rides
+//                (~33.1 - 34.8), then drops and rides until END OF LINE
 //         34.9   right hand rock: back to TRON cyan
 //   35.6 - 37.4  both hands draw one more wall each, beside the person
 //   37.65- 38.5  both fists come together and hold: END OF LINE (~38.5)

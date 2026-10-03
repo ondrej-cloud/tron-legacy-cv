@@ -321,6 +321,10 @@ export function createStage(view, teams) {
 
   return {
     group,
+    // view x of the floor's vanishing point (it drifts under the portal)
+    get vanish() {
+      return vanish;
+    },
     // grid space -> view units, see the header comment
     project(x, height, z) {
       const depth = Math.max(z - STAGE.gridScroll * now, 1e-3);
