@@ -7,6 +7,7 @@
 // puts the current values on the clipboard ready to paste into gestures.js.
 
 import { THRESHOLDS, DEFAULT_THRESHOLDS, FINGERS } from './gestures.js';
+import { measureHandlebars, steerFromTilt } from './handlebars.js';
 
 const STORAGE_KEY = 'tron-legacy-cv:thresholds';
 
@@ -187,10 +188,12 @@ export function createTuningPanel(hands) {
   controls.innerHTML = '<h3>THRESHOLDS</h3><div class="tn-sliders"></div>'
     + '<div class="tn-buttons"><button data-action="copy">Copy as code</button>'
     + '<button data-action="reset">Reset</button><span data-role="note">G closes this panel</span></div>'
-    + '<div class="tn-line tn-tracker" data-role="tracker"></div>';
+    + '<div class="tn-line tn-tracker" data-role="tracker"></div>'
+    + '<div class="tn-line tn-tracker" data-role="handlebars"></div>';
   root.appendChild(controls);
   const note = controls.querySelector('[data-role="note"]');
   const trackerLine = controls.querySelector('[data-role="tracker"]');
+  const handlebarsLine = controls.querySelector('[data-role="handlebars"]');
 
   const inputs = new Map();
   for (const slider of SLIDERS) {
@@ -254,6 +257,11 @@ export function createTuningPanel(hands) {
         ? `tracker: ${hands.trackerMode} · ${stats.fps.toFixed(0)} results/s · longest gap ${stats.maxGapMs} ms`
           + ` · hands lost ${stats.lost}`
         : `tracker: ${hands.status}`;
+      const bars = measureHandlebars(hands.left, hands.right, window.innerWidth / window.innerHeight);
+      handlebarsLine.textContent = bars.tilt === undefined
+        ? 'handlebars: need both hands'
+        : `handlebars: ${bars.valid ? 'grip' : bars.reason} · tilt ${bars.tilt.toFixed(0)}° → steer `
+          + `${steerFromTilt(bars.tilt).toFixed(2)} · gap ${bars.gap.toFixed(1)} palms · curl ${bars.curl.toFixed(2)}`;
     },
   };
 }

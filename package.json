@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node tools/test-gestures.mjs",
+    "test": "node tools/test-gestures.mjs && node tools/test-handlebars.mjs",
     "shot": "node tools/shot.mjs"
   },
   "devDependencies": {
