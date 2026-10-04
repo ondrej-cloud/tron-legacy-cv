@@ -398,7 +398,8 @@ export function createHud(container, { hands, view, teams, controls, endOfLine }
       boxes.left = null;
       boxes.right = null;
     },
-    draw(nowMs, seconds) {
+    // hands: false leaves the hands out (while riding, the ride's HUD shows them)
+    draw(nowMs, seconds, { hands: showHands = true } = {}) {
       const dt = Math.min(0.1, Math.max(0.001, (nowMs - lastMs) / 1000));
       lastMs = nowMs;
       if (canvas.width !== Math.round(view.width * pixelRatio)) resize(view.width, view.height);
@@ -410,7 +411,7 @@ export function createHud(container, { hands, view, teams, controls, endOfLine }
       const glitch = hash(step) < 0.012 ? (hash(step + 0.5) - 0.5) * 8 : 0;
       context.globalAlpha = 0.9 + 0.1 * hash(Math.floor(seconds * 30));
       context.translate(glitch, 0);
-      for (const hand of hands.list) {
+      for (const hand of showHands ? hands.list : []) {
         if (hand.landmarks) drawHand(hand, nowMs, dt, teams[hand.id].cssRgb());
       }
       for (const id of ['left', 'right']) if (!hands[id].visible) boxes[id] = null;

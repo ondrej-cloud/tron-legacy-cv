@@ -1,9 +1,11 @@
-// Scripted hands for demo mode: a 50 s loop that runs through every gesture.
+// Scripted hands for demo mode: a 50 s loop that runs through every gesture,
+// with a light cycle ride in the middle (about 22 s, while the loop holds).
 // The hands are procedural (gestures.js) and go through the same analysis as
 // camera hands, so this exercises the real gesture rules. Like a real hand,
 // the palm stays put while the fingers change pose: keyframes place the palm
 // where an open hand's pinch point would be (or place the index fingertip,
-// for drawing).
+// for drawing). While riding, the hands are two fists on the handlebars,
+// steered by an autopilot (see GRIP below).
 //
 // Timeline (seconds into the loop; the effect needs ~0.25 s to react):
 //    0.0 -  2.6  both palms open, moving apart: portal, Grid floor lights up
@@ -22,17 +24,30 @@
 //                (rings, holographic sweep, solid, rims: ~1.7 s), drop and
 //                ride off in 90° turns with jetwalls behind them (~18.0 - 22.8)
 //         20.3   right hand peace: the digitizing laser (20.8 - 24.6)
+//   23.6 - 24.0  right hand rock: back to TRON cyan (so the ride is TRON's)
 //   24.9 - 25.9  right hand draws a wall
 //         25.5   left hand makes "ok": a cyan disc
-//         26.6   right hand shaka: an orange baton rezzes with light traces
+//         26.6   right hand shaka: a cyan baton rezzes with light traces
 //   27.3 - 27.6  it swings left through the wall and cuts a gap in it
 //         28.2   left hand flicks: the baton bats the disc away (~28.6)
 //         ~31.3  the disc can't come home (the hand is gone) and fades out
 //   31.7 - 32.2  left hand comes to the baton's free end: GRAB (~32.4)
-//   32.6 - 33.6  the hands pull apart: the bar fills, the baton splits into its
+//   32.6 - 33.1  the hands pull apart: the bar fills, the baton splits into its
 //                two handles and a big light cycle rezzes between the hands
-//                (~33.1 - 34.8), then drops and rides until END OF LINE
-//         34.9   right hand rock: back to TRON cyan
+//         33.1   RIDE (ride/index.js): the loop holds here while it lasts. In
+//                seconds from the split (the match plays out the same way
+//                every time, at 60 fps; slower below that):
+//                 +0.0  the hands close into fists on the handlebars while the
+//                       cycle finishes rezzing
+//                 +1.7  hop on: the camera swoops down behind the cycle into
+//                       the arena, the camera picture shrinks into a corner
+//                 +3.0  round 1: 3, 2, 1 (CLU rezzes at the far end), GO (+5.4);
+//                       the fists tilt to steer, push forward to speed up
+//                +15.3  CLU rides into a jetwall and derezzes: CLU DEREZZED
+//                +17.5  TRON WINS, over a slow orbit of the arena
+//                +20.7  the arena breaks up into voxels, the camera picture
+//                       grows back and the Grid boots (+22.1); on from 34.3
+//         34.9   right hand rock: CLU orange
 //   35.6 - 37.4  both hands draw one more wall each, beside the person
 //   37.65- 38.5  both fists come together and hold: END OF LINE (~38.5)
 //   38.5 - 41.6  the Grid powers down: a derezz wave around the fists, then
@@ -114,6 +129,9 @@ const RIGHT = [
   key(20.05, 0.76, 0.5, 'peace'),
   key(20.6, 0.76, 0.5, 'peace'),
   key(20.9, 0.78, 0.56, 'open'),          // rests at the side while the laser scans
+  key(23.4, 0.78, 0.58, 'open'),
+  key(23.6, 0.78, 0.58, 'rock'),          // back to TRON cyan: its baton's cycle will be cyan
+  key(24.0, 0.78, 0.58, 'rock'),
   key(24.3, 0.78, 0.58, 'open'),
   tip(24.6, 0.64, 0.3, 'open'),
   tip(24.85, 0.64, 0.3, 'point'),
@@ -190,13 +208,30 @@ const LEFT = [
   key(DEMO_LOOP, 0.365, 0.62, 'open'),
 ];
 
-export function createDemo() {
+// While riding, the demo's hands hold the handlebars: two fists side by
+// side, the line between them tilted to steer and pushed towards the camera
+// (bigger palms) to speed up. They go through hands.js and handlebars.js
+// like camera hands would.
+const GRIP = {
+  x: 0.5, y: 0.6,          // the middle of the bars, viewport
+  gap: 0.46,               // between the palms, in frame heights (about 3.5 palm lengths)
+  reach: 0.9,              // s the hands take to reach the bars
+  roll: { left: 0.35, right: -0.35 },
+};
+// the timeline goes on here after a ride (just after the baton split)
+const RIDE_RESUME = 34.3;
+
+// ride: the ride mode (ride/index.js), whose demoInput() says what the
+// hands on the handlebars should do
+export function createDemo({ ride = null } = {}) {
   let currentTime = 0;
+  let offset = 0;            // demo clock time minus timeline time
+  let paused = null;         // { at: timeline time, since: clock time } while riding
 
   // Viewport offsets from the pinch midpoint (what hands.js positions) to the
   // index fingertip and to the palm centre, for a pose.
-  function offsets(pose, physical, roll, aspect) {
-    const points = poseToLandmarks({ x: 0, y: 0, size: PALM, roll, physical }, pose);
+  function offsets(pose, physical, roll, aspect, size = PALM) {
+    const points = poseToLandmarks({ x: 0, y: 0, size, roll, physical }, pose);
     const midX = (points[4].x + points[8].x) / 2;
     const midY = (points[4].y + points[8].y) / 2;
     let palmX = 0;
@@ -254,13 +289,59 @@ export function createDemo() {
     };
   }
 
+  // A fist on the handlebars. steer -1..1 and throttle 0..1 as handlebars.js
+  // reads them back; reach 0..1 blends from where the hand was (`from`).
+  function onBars(physical, input, reach, from, aspect) {
+    const tilt = Math.abs(input.steer) < 0.02 ? 0 : Math.sign(input.steer) * (4.5 + Math.abs(input.steer) * 24);
+    const angle = (tilt * Math.PI) / 180;
+    const side = physical === 'left' ? -1 : 1;
+    // palm size: 1 at neutral, bigger pushed forward, smaller pulled back
+    const ratio = input.brake ? 0.8 : 1 + (input.throttle - 0.5) * 0.9;
+    const size = PALM * ratio;
+    const roll = GRIP.roll[physical];
+    const palm = offsets(POSES.fist, physical, roll, aspect, size).palm;
+    const palmX = GRIP.x + (side * GRIP.gap / 2) * Math.cos(angle) / aspect;
+    const palmY = GRIP.y + (side * GRIP.gap / 2) * Math.sin(angle);
+    const target = { x: palmX - palm.x, y: palmY - palm.y, physical, roll, palmFacing: true, pose: POSES.fist, size };
+    if (!from || reach >= 1) return target;
+    const t = reach * reach * (3 - 2 * reach);
+    return {
+      ...target,
+      x: from.x + (target.x - from.x) * t,
+      y: from.y + (target.y - from.y) * t,
+      roll: from.roll + (roll - from.roll) * t,
+      pose: blendPoses(from.pose, POSES.fist, t),
+    };
+  }
+
+  function rideHands(input, t, aspect) {
+    if (input.away) return [];   // let go: the match is over
+    const reach = Math.min(1, (t - paused.since) / GRIP.reach);
+    return ['left', 'right'].map((physical) => {
+      const from = sample(physical === 'left' ? LEFT : RIGHT, paused.at, physical, aspect);
+      return onBars(physical, input, reach, from, aspect);
+    });
+  }
+
   return {
     get time() {
       return currentTime;
     },
     script(t) {
-      currentTime = t % DEMO_LOOP;
       const aspect = window.innerWidth / Math.max(1, window.innerHeight);
+      // a ride holds the timeline where it is, however long it takes
+      const input = ride?.demoInput();
+      if (input) {
+        paused ??= { at: (t - offset) % DEMO_LOOP, since: t };
+        currentTime = paused.at;
+        return rideHands(input, t, aspect);
+      }
+      if (paused) {
+        // after a baton ride, on from just after the split
+        offset = t - (paused.at > 31 ? RIDE_RESUME : paused.at);
+        paused = null;
+      }
+      currentTime = (t - offset) % DEMO_LOOP;
       return [sample(LEFT, currentTime, 'left', aspect), sample(RIGHT, currentTime, 'right', aspect)]
         .filter(Boolean);
     },

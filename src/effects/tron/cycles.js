@@ -121,8 +121,10 @@ export function createCycles({ view, teams, stage, grid3d, renderer, voxels, fla
   // owner: the launching hand, or 'both' for a cycle rezzed from a baton
   // pulled apart (it rides the whole floor); at: where it rezzes, in view
   // units; team: the owner's team. options.length: the bike's length on
-  // screen (view units) while it rezzes; options.accent colours its wheels.
-  function launch(owner, at, team, { length = null, accent = null } = {}) {
+  // screen (view units) while it rezzes; options.accent colours its wheels;
+  // options.mount: someone is getting on (ride mode), so it stays where it
+  // rezzed instead of dropping onto the floor and riding off.
+  function launch(owner, at, team, { length = null, accent = null, mount = false } = {}) {
     while (cycles.filter((cycle) => cycle.state !== 'gone').length >= CYCLE.maxCycles) {
       derezz(cycles.find((cycle) => cycle.state !== 'gone'));
     }
@@ -153,6 +155,7 @@ export function createCycles({ view, teams, stage, grid3d, renderer, voxels, fla
       goneAt: Infinity,
       light: 0,
       bike: null,
+      mount,
     };
     cycle.bike = acquireBike(cycle);
     cycles.push(cycle);
@@ -336,7 +339,7 @@ export function createCycles({ view, teams, stage, grid3d, renderer, voxels, fla
       const rolling = cycle.state === 'ride' ? CYCLE.speed * Math.sqrt(cycle.scale) / (HUB_HEIGHT * cycle.length) : 6;
       cycle.spin += dt * rolling;
       if (cycle.state === 'rezz') {
-        if (age >= REZZ.length) {
+        if (age >= REZZ.length && !cycle.mount) {
           cycle.state = 'drop';
           cycle.dropStart = now;
         }
@@ -492,11 +495,36 @@ export function createCycles({ view, teams, stage, grid3d, renderer, voxels, fla
     }
   }
 
+  // Where a cycle shows on screen: its middle (view units), its length on
+  // screen and which way its nose points (+1 right, -1 left).
+  function screenPose(cycle) {
+    const height = cycle.h + HUB_HEIGHT * cycle.length;
+    const tail = stage.project(cycle.x, height, cycle.z);
+    const nose = stage.project(cycle.x + Math.cos(cycle.yaw) * cycle.length, height,
+      cycle.z + Math.sin(cycle.yaw) * cycle.length);
+    return {
+      x: (tail.x + nose.x) / 2,
+      y: (tail.y + nose.y) / 2,
+      length: Math.hypot(nose.x - tail.x, nose.y - tail.y),
+      facing: nose.x >= tail.x ? 1 : -1,
+    };
+  }
+
+  // a mounted cycle leaves the AR Grid quietly (the arena has taken over)
+  function dismount(cycle) {
+    const index = cycles.indexOf(cycle);
+    if (index < 0) return;
+    releaseBike(cycle);
+    cycles.splice(index, 1);
+  }
+
   const api = {
     group: sketch.group,   // flat: the fallback bikes
     group3d,               // in grid3d's scene: the bikes and their walls
     counts,
     launch,
+    screenPose,
+    dismount,
     shatter,
     powerDown,
     segments: viewSegments,

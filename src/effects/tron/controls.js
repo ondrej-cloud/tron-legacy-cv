@@ -70,9 +70,11 @@ export const CONTROLS = {
 
 const PALM_POINTS = [0, 5, 9, 13, 17];
 
-// `log(name)` records an action for the stats.
+// `log(name)` records an action for the stats. `onBatonCycle(cycle,
+// holderId)` hears about a cycle rezzed from a baton; if it returns true,
+// somebody gets on it (ride mode) and it doesn't ride off.
 export function createControls({ hands, view, teams, walls, discs, cycles, batons, digitizer, endOfLine,
-  voxels, flashes, stage, log }) {
+  voxels, flashes, stage, log, onBatonCycle = null }) {
   let states = { left: createHandState('left'), right: createHandState('right') };
   const discHands = { left: discHand(), right: discHand() };
   const waves = [];
@@ -404,10 +406,12 @@ export function createControls({ hands, view, teams, walls, discs, cycles, baton
     const grabberTeam = teams[grab.grabber];
     const middle = { x: (holder.palm.x + grabber.palm.x) / 2, y: (holder.palm.y + grabber.palm.y) / 2 };
     batons.split(grab.holder, grab.side, { holder: grab.holder, grabber: grab.grabber });
-    cycles.launch('both', middle, holderTeam, {
+    const cycle = cycles.launch('both', middle, holderTeam, {
       length: distance * 0.9,
       accent: grabberTeam.index !== holderTeam.index ? grabberTeam.color : null,
+      mount: Boolean(onBatonCycle),
     });
+    if (onBatonCycle && !onBatonCycle(cycle, grab.holder)) cycle.mount = false;
     holder.batonSpent = true;
     holder.lastLaunch = time;
     grabber.lastLaunch = time;
@@ -560,11 +564,21 @@ export function createControls({ hands, view, teams, walls, discs, cycles, baton
     for (const tether of tethers) tether.strength = 0;
   }
 
+  // After a ride the hands are still fists on the handlebars: they have to
+  // open before a fist derezzes anything.
+  function holdOff() {
+    for (const id of ['left', 'right']) {
+      states[id].fistLatched = true;
+      states[id].batonSpent = true;
+    }
+  }
+
   return {
     get states() {
       return states;
     },
     reset,
+    holdOff,
     portal,
     tethers,
     counts,
@@ -572,7 +586,9 @@ export function createControls({ hands, view, teams, walls, discs, cycles, baton
     get grab() {
       return grab;
     },
-    update(nowMs, seconds, dt) {
+    // gestures: false while riding a light cycle: the hands hold the
+    // handlebars, and only END OF LINE still works
+    update(nowMs, seconds, dt, { gestures = true } = {}) {
       time = seconds;
       for (const hand of [hands.left, hands.right]) {
         const state = states[hand.id];
@@ -580,6 +596,18 @@ export function createControls({ hands, view, teams, walls, discs, cycles, baton
         else lose(state, hand);
       }
       updatePair(nowMs);
+      if (!gestures) {
+        for (const id of ['left', 'right']) {
+          const state = states[id];
+          if (state.trail) walls.finish(state.trail, time);
+          state.trail = null;
+          state.fistCharge = 0;
+          state.fistLatched = true;   // the fists on the bars mustn't derezz afterwards
+          state.action = '';
+        }
+        grab = null;
+        return;
+      }
       // while the Grid is down, nothing new can be made
       if (!endOfLine.active) {
         for (const hand of [hands.left, hands.right]) {

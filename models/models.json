@@ -1,3 +1,5 @@
 {
-  "light-cycle": { "file": "light-cycle.glb" }
+  "light-cycle": { "file": "light-cycle.glb", "forward": "-z" },
+  "tron-race-arena": { "file": "tron-race-arena/scene.gltf" },
+  "lightcycle-arena": { "file": "lightcycle-arena/scene.gltf" }
 }

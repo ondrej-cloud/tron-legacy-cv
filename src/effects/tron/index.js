@@ -2,10 +2,11 @@
 // switch each hand between TRON and CLU colours, summon and throw identity
 // discs that ricochet off the walls and each other, launch light cycles onto
 // the Grid floor, swing a light baton that cuts walls and bats discs (pulled
-// apart, it rezzes a light cycle), derezz what is around a fist, open a
-// portal between the hands, digitize the person on camera with a laser
-// (person segmentation), and shut the whole Grid down with END OF LINE; a
-// holographic HUD shows what the hand tracker sees (the rules are in
+// apart, it rezzes a light cycle that you hop on and ride in a duel against
+// CLU, your fists held like handlebars: ride/), derezz what is around a
+// fist, open a portal between the hands, digitize the person on camera with
+// a laser (person segmentation), and shut the whole Grid down with END OF
+// LINE; a holographic HUD shows what the hand tracker sees (the rules are in
 // controls.js).
 //
 // Most of the scene is flat, in "view units": the frame is 1 unit tall, x
@@ -36,12 +37,14 @@ import { cssFilter } from './grade.js';
 import { createControls } from './controls.js';
 import { createHud } from './hud.js';
 import { createDemo } from './demo.js';
+import { createRide } from './ride/index.js';
 
 export const meta = {
   title: 'Tron',
   hint: 'point: light wall · rock: switch colour · ok: identity disc, flick to throw · '
     + 'thumbs up: light cycle · peace: digitize · shaka: light baton · fist (hold): derezz · '
-    + 'two fists together: end of line · both palms open: portal',
+    + 'two fists together: end of line · both palms open: portal · '
+    + 'baton pulled apart: ride a light cycle, fists as handlebars (or R, arrow keys)',
 };
 
 // s of darkness after END OF LINE before the Grid boots again in demo mode
@@ -100,10 +103,18 @@ export function createEffect({ container, hands, host }) {
   backScene.add(stage.group, digitizer.group);
   grid3d.scene.add(cycles.group3d);
   frontScene.add(cycles.group, walls.object, discs.group, batons.group, voxels.mesh, flashes.group);
+  // a light cycle duel against CLU, entered by pulling a baton apart (ride/)
+  const ride = createRide({ renderer, container, hands, host, teams, endOfLine, view, log,
+    envMap: grid3d.environment, onExit: () => afterRide() });
   const controls = createControls({ hands, view, teams, walls, discs, cycles, batons, digitizer, endOfLine,
-    voxels, flashes, stage, log });
+    voxels, flashes, stage, log,
+    onBatonCycle: (cycle, holderId) => ride.mount(cycle, teams[holderId].index, {
+      pose: () => cycles.screenPose(cycle),
+      dismount: () => cycles.dismount(cycle),
+    }) });
   const hud = createHud(container, { hands, view, teams, controls, endOfLine });
-  const demo = createDemo();
+  const demo = createDemo({ ride });
+  const startRide = new URLSearchParams(location.search).has('ride');
 
   const composer = new EffectComposer(renderer);
   composer.addPass(new RenderPass(backScene, camera));
@@ -130,6 +141,7 @@ export function createEffect({ container, hands, host }) {
     renderer.setSize(view.width, view.height, false);
     composer.setSize(view.width, view.height);
     hud.resize(view.width, view.height);
+    ride.resize(view.width, view.height, pixelRatio);
   }
 
   // Sustained low frame rate -> lower pixel ratio. Judged on the median
@@ -169,8 +181,17 @@ export function createEffect({ container, hands, host }) {
     controls.reset();
     teams.reset();
     hud.reset();
+    ride.reset();
     endOfLine.boot();
     log('grid boot');
+  }
+
+  // Back from a ride: the AR Grid boots fresh, and the fists that held the
+  // handlebars have to open before they do anything.
+  function afterRide() {
+    enter();
+    controls.holdOff();
+    log('ride over');
   }
 
   // After END OF LINE the screen is dark: back to the intro. In demo mode
@@ -194,6 +215,7 @@ export function createEffect({ container, hands, host }) {
     // digitizing laser dims it while the person is digitized, and so does
     // END OF LINE while the Grid is down.
     get cameraFilter() {
+      if (ride.covering) return ride.cameraFilter;
       return cssFilter(Math.min(digitizer.brightness, endOfLine.brightness()));
     },
     demoScript: (t) => demo.script(t),
@@ -208,7 +230,11 @@ export function createEffect({ container, hands, host }) {
       afterEndOfLine();
       teams.left.update(dt);
       teams.right.update(dt);
-      controls.update(nowMs, seconds, dt);
+      controls.update(nowMs, seconds, dt, { gestures: !ride.busy });
+      if (startRide && ride.counts.rides === 0 && ride.model === 'ready') ride.startNow();
+      ride.update(seconds, dt);
+      // the arena covers the screen: the AR Grid waits
+      if (ride.covering) return;
       cycles.update(seconds, dt);
       digitizer.update(seconds, dt, nowMs);
       walls.update(seconds);
@@ -221,8 +247,12 @@ export function createEffect({ container, hands, host }) {
     },
 
     render() {
-      composer.render();
-      hud.draw(lastMs, seconds);
+      if (ride.covering) ride.render();
+      else {
+        ride.warmup();
+        composer.render();
+      }
+      hud.draw(lastMs, seconds, { hands: !ride.covering });
     },
 
     resize,
@@ -251,6 +281,7 @@ export function createEffect({ container, hands, host }) {
         events: events.join(', '),
         effectFps: measuredFps,
         pixelRatio,
+        ...ride.stats(),
       };
     },
   };

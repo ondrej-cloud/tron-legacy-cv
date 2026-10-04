@@ -1,0 +1,11 @@
+Model Information:
+* title:	Tron Race Arena
+* source:	https://sketchfab.com/3d-models/tron-race-arena-87d91ccd75d4445f8ab0f70288e827af
+* author:	SpringSociety (https://sketchfab.com/jcreadingtutor)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "Tron Race Arena" (https://sketchfab.com/3d-models/tron-race-arena-87d91ccd75d4445f8ab0f70288e827af) by SpringSociety (https://sketchfab.com/jcreadingtutor) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)

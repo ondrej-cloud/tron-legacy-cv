@@ -40,6 +40,7 @@ const fragmentShader = /* glsl */`
   uniform float uTime;
   uniform float uMirror;
   uniform float uReflection;   // how bright the reflection is
+  uniform float uNearFade;     // walls this close to the camera fade out (0: never)
   varying vec4 vWall;
   varying vec2 vRun;
   varying vec2 vNormal;
@@ -97,13 +98,16 @@ const fragmentShader = /* glsl */`
     // the reflection fades out with depth below the floor, in faint streaks
     float mirrored = uReflection * exp(-h * 3.5) * (0.75 + 0.25 * sin(along * 41.0 + h * 5.0));
     col *= mix(1.0, mirrored, uMirror);
+    if (uNearFade > 0.0) alpha *= smoothstep(uNearFade * 0.3, uNearFade, distance(cameraPosition, vWorld));
     gl_FragColor = vec4(col * alpha, 1.0);
   }
 `;
 
 // teamColors: [TRON, CLU]; time: a shared { value } uniform (seconds);
-// reflection: brightness of the reflection in the floor (0 for none)
-export function createJetwalls(capacity, teamColors, time, { reflection = 0.2 } = {}) {
+// reflection: brightness of the reflection in the floor (0 for none);
+// nearFade: walls closer than this to the camera fade out (a chase camera
+// right behind a bike would otherwise be inside its wall)
+export function createJetwalls(capacity, teamColors, time, { reflection = 0.2, nearFade = 0 } = {}) {
   const positions = new Float32Array(capacity * 4 * 3);
   const wallData = new Float32Array(capacity * 4 * 4);
   const runData = new Float32Array(capacity * 4 * 2);
@@ -123,6 +127,7 @@ export function createJetwalls(capacity, teamColors, time, { reflection = 0.2 } 
       uTime: time,
       uMirror: { value: mirror },
       uReflection: { value: reflection },
+      uNearFade: { value: nearFade },
     },
     transparent: true,
     depthTest: true,
