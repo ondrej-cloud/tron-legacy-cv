@@ -24,7 +24,7 @@ export function createUI(hands) {
   root.className = 'sd-ui';
   root.innerHTML = `
     <div class="sd-status sd-hideable"></div>
-    <div class="sd-keys sd-hideable">H hide UI · F fullscreen · G tune gestures · N music · D demo · M mouse · C camera</div>`;
+    <div class="sd-keys sd-hideable">H hide UI · F fullscreen · G tune gestures · N music · R ride · D demo · M mouse · C camera</div>`;
   document.body.appendChild(root);
   const status = root.querySelector('.sd-status');
   // ?clean starts with the UI hidden (screenshots, recordings)

@@ -2,12 +2,12 @@
 // arena floor is the plane y = 0, x across, z along, centred on the origin.
 
 export const ARENA = {
-  half: 64,               // the duel floor is a square 2 * half across
+  half: 160,              // the duel floor is a square 2 * half across
   wallHeight: 5,          // the boundary walls
   gridCell: 4,            // floor grid lines every this many units ...
   gridMajor: 5,           // ... and a brighter one every this many cells
-  stadiumScale: 3.6,      // the race arena model around the floor (models.json)
-  fog: 0.0042,            // exponential-squared fog density
+  stadiumScale: 9,        // the race arena model around the floor (models.json)
+  fog: 0.0022,            // exponential-squared fog density
 };
 
 export const BIKE = {
@@ -41,9 +41,10 @@ export const MATCH = {
   idleAfter: 1.5,         // s without a grip before the cycle cruises on its own
 };
 
-// Start positions: the player at the south end facing north (+z), CLU at
-// the north end facing south.
+// Start positions: the player south of the centre facing north (+z), CLU
+// north of it facing south, close enough to see each other rezz; the rest
+// of the floor is room to manoeuvre.
 export const STARTS = [
-  { x: -8, z: -ARENA.half + 18, heading: Math.PI / 2 },
-  { x: 8, z: ARENA.half - 18, heading: -Math.PI / 2 },
+  { x: -8, z: -45, heading: Math.PI / 2 },
+  { x: 8, z: 45, heading: -Math.PI / 2 },
 ];

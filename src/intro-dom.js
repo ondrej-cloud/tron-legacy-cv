@@ -4,6 +4,7 @@ import { TITLE_FONT } from './intro-title.js';
 
 const MUSIC_CREDIT_URL = 'https://pixabay.com/music/synthwave-the-arcade-city-cinematic-hybrid-music-519731/';
 const CYCLE_CREDIT_URL = 'https://dreamloft3d.itch.io/tron-light-cycle';
+const ARENA_CREDIT_URL = 'https://sketchfab.com/3d-models/tron-race-arena-87d91ccd75d4445f8ab0f70288e827af';
 const FONTS_URL = 'https://fonts.googleapis.com/css2?family=Michroma&family=Rajdhani:wght@500;600;700&display=swap';
 
 let fontsReady = null;
@@ -79,6 +80,8 @@ export function buildDom() {
         Luis_Humanoide (Pixabay)</a>
         <span class="intro-credit-model">Light cycle model · <a href="${CYCLE_CREDIT_URL}" target="_blank"
         rel="noopener noreferrer">Dreamloft3D (CC BY 4.0)</a></span>
+        <span class="intro-credit-model">Arena model · <a href="${ARENA_CREDIT_URL}" target="_blank"
+        rel="noopener noreferrer">SpringSociety (CC BY 4.0)</a></span>
         <span class="intro-credit-key"><kbd>N</kbd> mutes the music</span>
       </p>
       <div class="intro-stage">

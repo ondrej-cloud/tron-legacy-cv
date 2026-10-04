@@ -6,7 +6,8 @@
 
 I'm a big fan of TRON: Legacy and wanted to build a computer vision project, so I made this. Tron Legacy CV
 puts the Grid over your webcam: you draw light walls with your finger, throw an identity disc that bounces off
-them, pull a baton apart into a light cycle, get digitized by the laser and shut the Grid down with two fists.
+them, pull a baton apart into a light cycle and race CLU on it, get digitized by the laser and shut the Grid
+down with two fists.
 Everything is controlled with hand gestures and runs live in the browser.
 
 Under the hood, MediaPipe tracks 21 landmarks on each hand, and everything you see is driven by a gesture
@@ -17,6 +18,8 @@ recognizer built on top of those landmarks. It all runs in your browser and noth
 - **Nine gestures, two hands**: point, rock, OK (and a flick to throw), thumbs up, a held fist, two fists
   together, peace, shaka and both open palms. Each hand plays independently and has its own team colour,
   TRON cyan or CLU orange.
+- **A light cycle duel you steer with your hands**: hold them up like handlebars, tilt to turn, push towards
+  the camera to speed up.
 - **Finger-level gesture recognition**: per-finger joint angles, thumb-to-fingertip contacts with
   hysteresis, palm orientation and handedness, all measured relative to palm size, so it works at any
   distance from the camera.
@@ -45,7 +48,7 @@ recognizer built on top of those landmarks. It all runs in your browser and noth
 | ✊ **Hold a fist** | A ring charges for half a second, then everything around that hand derezzes into voxels |
 | ✊✊ **Two fists together** | END OF LINE: the Grid powers down light by light, the words are typed in the dark, and you're back at the start screen |
 | ✌️ **Peace** | The digitizing laser sweeps over you and turns your outline into light |
-| 🤙 **Shaka** (thumb + pinky) | A light baton in your hand: swing it to cut walls and bat discs away. Grab its other end with your other hand and pull apart, and it splits into two handles and rezzes a light cycle |
+| 🤙 **Shaka** (thumb + pinky) | A light baton in your hand: swing it to cut walls and bat discs away. Grab its other end with your other hand and pull apart: it splits into two handles, a light cycle rezzes and you ride it into the arena (see below) |
 | 🖐️🖐️ **Both palms open**, facing the camera | Opens a portal of light between your hands and lights up the Grid |
 
 <table>
@@ -72,6 +75,31 @@ recognizer built on top of those landmarks. It all runs in your browser and noth
   <tr>
     <td><img src="media/baton-cycle.jpg" alt="A light cycle with glowing cyan wheels rezzed between the hands"><br>…and a light cycle rezzes between your hands</td>
     <td><img src="media/intro.jpg" alt="The intro screen with the nine controls listed next to animated hand glyphs"><br>The intro, with the controls</td>
+  </tr>
+</table>
+
+## Light cycle duel
+
+Pull a baton apart and you don't just get a light cycle, you get on it: the camera dives behind the bike into a
+TRON arena and you race CLU's orange cycle. Both of you leave jetwalls; whoever hits a wall or the arena
+boundary derezzes, and the other side scores. Your webcam shrinks into a corner so you can still see your hands.
+
+You steer with both hands held up like **handlebars** (`src/handlebars.js`):
+
+- **Tilt** the line between your hands to turn: right hand lower turns right, with a small dead zone so a
+  slightly uneven grip still rides straight.
+- **Push** your hands towards the camera to speed up and pull them back to brake. Distance is read from the
+  apparent palm size, compared with where your hands were when you took hold.
+- A grip needs both hands at least half closed and a handlebar's width apart, so two fists held together
+  still mean END OF LINE, which takes you out of the arena.
+
+Without a camera, `R` (or `?ride`) starts a ride and the arrow keys steer.
+
+<table>
+  <tr>
+    <td width="33%"><img src="media/ride.jpg" alt="Riding a cyan light cycle in the arena, with the webcam picture in the corner"><br>Riding against CLU</td>
+    <td width="33%"><img src="media/ride-derezz.jpg" alt="CLU's orange cycle derezzing into voxels against a jetwall"><br>CLU hits a jetwall</td>
+    <td width="33%"><img src="media/ride-win.jpg" alt="TRON WINS over the arena, with the winning cycle's trail on the floor"><br>TRON wins</td>
   </tr>
 </table>
 
@@ -146,10 +174,11 @@ On macOS you can also double-click `Start.command`.
 | `H` | hide the UI |
 | `G` | gesture tuning panel |
 | `N` | music on/off |
+| `R` | ride a light cycle (without the baton) |
 | `D` | scripted demo on/off |
 | `M` / `C` | mouse / camera input |
 
-URL options: `?skipintro`, `?demo`, `?tune`, `?clean` (start with the UI hidden), `?tracker=worker`.
+URL options: `?skipintro`, `?demo`, `?tune`, `?clean` (start with the UI hidden), `?ride`, `?tracker=worker`.
 
 ### Tests and screenshots
 
@@ -160,7 +189,7 @@ npm run shot -- ./ --query "demo=1&skipintro"   # headless screenshots with a fa
 ```
 
 `npm test` runs every pose of the procedural hand through the recognizer for both hands, palm in and out and
-tilted (727 checks). The screenshot tool drives headless Chrome on the real GPU with a fake webcam; all the
+tilted (727 checks), and checks the handlebar reading: grip, steering and throttle (14 checks). The screenshot tool drives headless Chrome on the real GPU with a fake webcam; all the
 pictures in this README come from it.
 
 ## Project structure
@@ -173,12 +202,14 @@ src/
   tracker-worker.js     the same tracker in a Web Worker (opt-in, ?tracker=worker)
   gestures.js           finger analysis, gesture classifier, thresholds, procedural hand
   segmentation.js       selfie segmentation for the digitizing laser
+  handlebars.js         both hands as light cycle handlebars (steer, throttle, brake)
   tuning.js             live tuning panel (G)
   music.js, sfx.js      soundtrack (crossfaded loop, intro/Grid filter, tape stop) and synthesised effects
   ui.js                 status and keyboard shortcuts
   intro*.js, intro.css  camera gate, boot sequence, controls, entering the Grid
   effects/tron/         glass walls, discs, baton, 3D light cycles and jetwalls, voxels, portal,
                         Grid, HUD, digitize, END OF LINE, demo
+  effects/tron/ride/    the light cycle duel: arena, chase camera, CLU's AI, rules, HUD
 tools/
   test-gestures.mjs     recognition tests
   shot.mjs              headless screenshots
@@ -198,6 +229,10 @@ Built with [Three.js](https://threejs.org) and [MediaPipe](https://ai.google.dev
 (Hand Landmarker and Image Segmenter).
 
 Light cycle model: [Tron Light Cycle](https://dreamloft3d.itch.io/tron-light-cycle) by Dreamloft3D, licensed under
+[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+
+Arena model: [Tron Race Arena](https://sketchfab.com/3d-models/tron-race-arena-87d91ccd75d4445f8ab0f70288e827af)
+by [SpringSociety](https://sketchfab.com/jcreadingtutor), licensed under
 [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
 
 Music: [The Arcade City (Cinematic Hybrid Music)](https://pixabay.com/music/synthwave-the-arcade-city-cinematic-hybrid-music-519731/)

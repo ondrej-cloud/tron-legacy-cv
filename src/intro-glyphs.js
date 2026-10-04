@@ -693,7 +693,7 @@ export const CONTROLS = [
   { id: 'peace', name: 'Peace sign', action: 'Digitize yourself', detail: 'A laser sweep turns your outline into light',
     scene: peaceScene },
   { id: 'shaka', name: 'Shaka', action: 'Light baton',
-    detail: 'Grab the other end with your other hand and pull apart to rezz a light cycle', scene: shakaScene },
+    detail: 'Grab the other end, pull apart and ride the cycle against CLU', scene: shakaScene },
   { id: 'palms', name: 'Both palms open', action: 'Open a portal', detail: 'Palms toward the camera',
     scene: portalScene },
 ];

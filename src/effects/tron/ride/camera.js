@@ -152,7 +152,7 @@ export function createRideCamera() {
       apply(roll);
     },
     // a slow orbit high over the arena
-    orbit(seconds, dt, radius = 110, height = 55) {
+    orbit(seconds, dt, radius = 210, height = 95) {
       const angle = seconds * 0.12;
       position.lerp(scratch.set(Math.cos(angle) * radius, height, Math.sin(angle) * radius), ease(dt, 1.2));
       target.lerp(scratch.set(0, 0, 0), ease(dt, 0.8));
