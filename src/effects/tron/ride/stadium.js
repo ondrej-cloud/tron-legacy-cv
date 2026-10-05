@@ -1,10 +1,11 @@
 // The stadium around the duel floor: "Tron Race Arena" by SpringSociety
 // (CC BY 4.0, see models/tron-race-arena/license.txt), a ring of track with
-// stands along it, scaled up so its inner edge runs around the floor's
-// boundary walls. Its 154 pieces share one material, so they are merged into
-// a single mesh (one draw call). The model's own emissive texture has the
-// floodlights, light strips and the crowd's lights; the base colour is kept
-// dark so the stadium reads as a shape in the fog behind the walls.
+// stands along it, scaled up so its inner edge runs just behind the
+// grandstand around the floor (stands.js). Its 154 pieces share one
+// material, so they are merged into a single mesh (one draw call). The
+// model's own emissive texture has the floodlights, light strips and the
+// crowd's lights; the base colour is kept dark so the stadium reads as a
+// shape in the fog beyond the grandstand.
 //
 // Loaded in the background; the arena works without it.
 import * as THREE from 'three';

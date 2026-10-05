@@ -19,7 +19,7 @@ recognizer built on top of those landmarks. It all runs in your browser and noth
   together, peace, shaka and both open palms. Each hand plays independently and has its own team colour,
   TRON cyan or CLU orange.
 - **A light cycle duel you steer with your hands**: hold them up like handlebars, tilt to turn, push towards
-  the camera to speed up.
+  the camera to speed up, in an arena with ramps and jumps.
 - **Finger-level gesture recognition**: per-finger joint angles, thumb-to-fingertip contacts with
   hysteresis, palm orientation and handedness, all measured relative to palm size, so it works at any
   distance from the camera.
@@ -80,26 +80,34 @@ recognizer built on top of those landmarks. It all runs in your browser and noth
 
 ## Light cycle duel
 
-Pull a baton apart and you don't just get a light cycle, you get on it: the camera dives behind the bike into a
-TRON arena and you race CLU's orange cycle. Both of you leave jetwalls; whoever hits a wall or the arena
-boundary derezzes, and the other side scores. Your webcam shrinks into a corner so you can still see your hands.
+Pull a baton apart and you don't just get a light cycle, you get on it: the cycle rezzes facing away from you
+and the camera pushes straight into the seat, into a TRON arena where you race CLU's orange cycle. Both of you
+leave jetwalls; whoever hits a wall or the arena boundary derezzes, and the other side scores.
+
+- **The arena** has ramps up onto raised decks, a sunken bowl and kickers. Hit a kicker at speed and you're
+  airborne long enough to clear a jetwall.
+- **CLU** switches between hunting you, boxing you in and breaking away into open floor, and uses the ramps.
+- **A radar** in the corner and an arrow at the screen edge always show where CLU is, even behind you.
+- **After the match** a slow-motion kill cam replays the final crash, then both open palms give you a rematch
+  and two fists end the line.
 
 You steer with both hands held up like **handlebars** (`src/handlebars.js`):
 
 - **Tilt** the line between your hands to turn: right hand lower turns right, with a small dead zone so a
   slightly uneven grip still rides straight.
-- **Push** your hands towards the camera to speed up and pull them back to brake. Distance is read from the
-  apparent palm size, compared with where your hands were when you took hold.
+- **Push** your hands towards the camera to speed up and pull them back to brake (braking also shows a rear
+  view). Distance is read from the apparent palm size, compared with where your hands were when you took hold.
 - A grip needs both hands at least half closed and a handlebar's width apart, so two fists held together
-  still mean END OF LINE, which takes you out of the arena.
+  still mean END OF LINE.
 
-Without a camera, `R` (or `?ride`) starts a ride and the arrow keys steer.
+Your webcam stays in a corner so you can see your hands. Without a camera, `R` (or `?ride`) starts a ride and
+the arrow keys steer.
 
 <table>
   <tr>
-    <td width="33%"><img src="media/ride.jpg" alt="Riding a cyan light cycle in the arena, with the webcam picture in the corner"><br>Riding against CLU</td>
-    <td width="33%"><img src="media/ride-derezz.jpg" alt="CLU's orange cycle derezzing into voxels against a jetwall"><br>CLU hits a jetwall</td>
-    <td width="33%"><img src="media/ride-win.jpg" alt="TRON WINS over the arena, with the winning cycle's trail on the floor"><br>TRON wins</td>
+    <td width="33%"><img src="media/ride.jpg" alt="Riding a cyan light cycle in the arena, with the radar, CLU's direction and the webcam picture"><br>Radar and CLU's direction</td>
+    <td width="33%"><img src="media/ride-jump.jpg" alt="A light cycle in the arena with its rounded-tile floor and the stands"><br>The arena</td>
+    <td width="33%"><img src="media/ride-win.jpg" alt="TRON WINS with match stats and the rematch and END OF LINE options"><br>Rematch or END OF LINE</td>
   </tr>
 </table>
 
@@ -209,7 +217,7 @@ src/
   intro*.js, intro.css  camera gate, boot sequence, controls, entering the Grid
   effects/tron/         glass walls, discs, baton, 3D light cycles and jetwalls, voxels, portal,
                         Grid, HUD, digitize, END OF LINE, demo
-  effects/tron/ride/    the light cycle duel: arena, chase camera, CLU's AI, rules, HUD
+  effects/tron/ride/    the light cycle duel: terrain, arena, chase camera, CLU's AI, radar, kill cam
 tools/
   test-gestures.mjs     recognition tests
   shot.mjs              headless screenshots

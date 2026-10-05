@@ -1,5 +1,6 @@
 // Jetwalls in 3D: the walls of light a light cycle leaves behind, standing
-// on a floor at y = 0, like the film's. A razor-bright white-hot top edge in
+// on the floor (at y = 0, or on whatever ground each stretch was laid on),
+// like the film's. A razor-bright white-hot top edge in
 // a team-coloured glow, a translucent body that is denser towards the top
 // with long horizontal streaks and slow waves of light flowing through it,
 // brighter where it is seen edge-on (fresnel), a fainter line where it
@@ -20,6 +21,7 @@ const vertexShader = /* glsl */`
   attribute vec4 aWall;     // v up the wall (0 floor, 1 top), alpha, heat, team
   attribute vec2 aRun;      // distance along the wall, distance back from the cycle
   attribute vec2 aNormal;   // the wall's normal on the floor (x, z)
+  attribute float aBase;    // height of the ground the wall stands on
   uniform float uMirror;    // 1: the reflection under the floor
   varying vec4 vWall;
   varying vec2 vRun;
@@ -29,7 +31,9 @@ const vertexShader = /* glsl */`
     vWall = aWall;
     vRun = aRun;
     vNormal = aNormal;
-    vec4 world = modelMatrix * vec4(position.x, position.y * (1.0 - 2.0 * uMirror), position.z, 1.0);
+    // the reflection hangs down from the wall's foot
+    float y = aBase + (position.y - aBase) * (1.0 - 2.0 * uMirror);
+    vec4 world = modelMatrix * vec4(position.x, y, position.z, 1.0);
     vWorld = world.xyz;
     gl_Position = projectionMatrix * viewMatrix * world;
   }
@@ -112,11 +116,13 @@ export function createJetwalls(capacity, teamColors, time, { reflection = 0.2, n
   const wallData = new Float32Array(capacity * 4 * 4);
   const runData = new Float32Array(capacity * 4 * 2);
   const normalData = new Float32Array(capacity * 4 * 2);
+  const baseData = new Float32Array(capacity * 4);
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3).setUsage(THREE.DynamicDrawUsage));
   geometry.setAttribute('aWall', new THREE.BufferAttribute(wallData, 4).setUsage(THREE.DynamicDrawUsage));
   geometry.setAttribute('aRun', new THREE.BufferAttribute(runData, 2).setUsage(THREE.DynamicDrawUsage));
   geometry.setAttribute('aNormal', new THREE.BufferAttribute(normalData, 2).setUsage(THREE.DynamicDrawUsage));
+  geometry.setAttribute('aBase', new THREE.BufferAttribute(baseData, 1).setUsage(THREE.DynamicDrawUsage));
   geometry.setIndex(new THREE.BufferAttribute(quadIndices(capacity), 1));
 
   const material = (mirror) => new THREE.ShaderMaterial({
@@ -147,9 +153,11 @@ export function createJetwalls(capacity, teamColors, time, { reflection = 0.2, n
 
   let count = 0;
   const vertex = (index, end, v, height, nx, nz) => {
+    const base = end.y ?? 0;
     positions[index * 3] = end.x;
-    positions[index * 3 + 1] = v * height;
+    positions[index * 3 + 1] = base + v * height;
     positions[index * 3 + 2] = end.z;
+    baseData[index] = base;
     wallData[index * 4] = v;
     wallData[index * 4 + 1] = end.alpha;
     wallData[index * 4 + 2] = end.heat;
@@ -162,11 +170,14 @@ export function createJetwalls(capacity, teamColors, time, { reflection = 0.2, n
 
   return {
     object,
+    wall,     // the two meshes, for a scene that orders its drawing itself
+    mirror,
     begin() {
       count = 0;
     },
-    // One stretch of wall from a to b. Each end: { x, z, height, alpha, heat,
-    // team, along, back }: world floor position, wall height, opacity (0..1),
+    // One stretch of wall from a to b. Each end: { x, z, y, height, alpha,
+    // heat, team, along, back }: world floor position, the height of the
+    // ground under it (optional, 0), wall height, opacity (0..1),
     // heat (0..1, fresh or struck glass runs white-hot), team index, distance
     // along the wall, and distance back from the cycle that emits it.
     quad(a, b) {
@@ -187,7 +198,7 @@ export function createJetwalls(capacity, teamColors, time, { reflection = 0.2, n
     },
     end() {
       geometry.setDrawRange(0, count * 6);
-      for (const name of ['position', 'aWall', 'aRun', 'aNormal']) uploadPrefix(geometry.getAttribute(name), count * 4);
+      for (const name of ['position', 'aWall', 'aRun', 'aNormal', 'aBase']) uploadPrefix(geometry.getAttribute(name), count * 4);
     },
     get count() {
       return count;

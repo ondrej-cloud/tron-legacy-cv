@@ -1,11 +1,11 @@
-// Tuning for the light cycle duel. World units are roughly metres: the
-// arena floor is the plane y = 0, x across, z along, centred on the origin.
+// Tuning for the light cycle duel. World units are roughly metres: x
+// across, z along, y up, centred on the origin. The floor is at y = 0 apart
+// from the ramps, decks and the bowl in terrain.js.
 
 export const ARENA = {
   half: 160,              // the duel floor is a square 2 * half across
   wallHeight: 5,          // the boundary walls
-  gridCell: 4,            // floor grid lines every this many units ...
-  gridMajor: 5,           // ... and a brighter one every this many cells
+  tile: 24,               // the floor's tile pattern repeats every this many units
   stadiumScale: 9,        // the race arena model around the floor (models.json)
   fog: 0.0022,            // exponential-squared fog density
 };
@@ -28,15 +28,29 @@ export const BIKE = {
   collideRadius: 1.1,     // two bikes this close crash into each other
   paceAfter: 6,           // s into a round before the Grid starts speeding up ...
   paceRate: 0.045,        // ... by this fraction of the speed per second
+  gravity: 28,            // m/s² in the air: stronger than Earth's, so jumps feel snappy
+  hillPull: 11,           // m/s² of speed lost per unit of slope climbed (gained downhill)
+  airborneAbove: 0.15,    // m of air under the wheels before it counts as flying
+  maxLift: 13,            // m/s, the fastest the ground can carry it upwards (a steep bank
+                          // taken at full speed is a hop, not a launch into the sky)
+  hardLanding: 9,         // m/s coming down onto the ground: a hard landing
+  height: 1.1,            // the bike's body, for bumping into the other one
 };
 
 export const MATCH = {
   winScore: 3,            // first to this many rounds
   demoWinScore: 1,        // a short match in demo mode: one round
+  difficulty: 0.55,       // CLU, from 0 (slow to react, short-sighted) to 1 (sharp)
+  demoDifficulty: 0.45,   // ... in demo mode
   countdown: 3.2,         // s: 3, 2, 1, then GO
-  crashHold: 2.2,         // s after a derezz before the next round
-  resultHold: 3.2,        // s the TRON WINS / CLU WINS screen stays
-  swoop: 1.3,             // s, the camera dives in behind the bike
+  crashHold: 3.6,         // s after a derezz before the next round (the crash, then its replay)
+  finalHold: 5.4,         // s after the deciding derezz: the crash, then a slow kill-cam replay
+  demoResultHold: 3.5,    // s the TRON WINS / CLU WINS screen stays in demo mode (otherwise it
+                          // waits for open palms (rematch) or END OF LINE)
+  resultIdle: 30,         // s with no hands in view on that screen before it goes back to the Grid
+  choiceHold: 0.7,        // s both palms have to stay open for a rematch
+  hopOn: 0.95,            // s into the baton cycle's rezz when the camera starts to push in
+  swoop: 1.15,            // s, the camera pushes in behind the bike, the room fading into the arena
   exit: 1.4,              // s, the arena derezzes back to the camera
   idleAfter: 1.5,         // s without a grip before the cycle cruises on its own
 };

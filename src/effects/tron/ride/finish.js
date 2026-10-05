@@ -1,5 +1,6 @@
 // The last pass over the ride's frame (after bloom): speed lines streaming
 // out from where the bike is heading, a flash for cuts and crashes, the
+// look of a replay (cooler, a little drained, darker at the edges), the
 // frame breaking up into voxels when the arena derezzes on the way out,
 // and an overall dimmer for END OF LINE.
 import * as THREE from 'three';
@@ -15,6 +16,7 @@ const FinishShader = {
     uFlash: { value: 0 },
     uFlashColor: { value: new THREE.Color(0.7, 0.95, 1) },
     uDissolve: { value: 0 },     // 0 whole .. 1 gone
+    uReplay: { value: 0 },       // 0 live .. 1 a replay
     uPower: { value: 1 },
   },
   vertexShader: /* glsl */`
@@ -33,6 +35,7 @@ const FinishShader = {
     uniform float uFlash;
     uniform vec3 uFlashColor;
     uniform float uDissolve;
+    uniform float uReplay;
     uniform float uPower;
     varying vec2 vUv;
 
@@ -63,6 +66,13 @@ const FinishShader = {
       }
 
       color += uFlashColor * uFlash * (1.0 - 0.6 * smoothstep(0.0, 0.9, radius));
+
+      if (uReplay > 0.0) {
+        float grey = dot(color, vec3(0.299, 0.587, 0.114));
+        vec3 graded = mix(color, vec3(grey) * vec3(0.85, 0.97, 1.12), 0.35);
+        graded *= 1.0 - 0.45 * smoothstep(0.45, 1.1, radius);
+        color = mix(color, graded, uReplay);
+      }
       color *= uPower;
 
       // the derezz: the frame breaks into blocks that flare and go out,
@@ -87,12 +97,13 @@ export function createFinishPass() {
     setSize(width, height) {
       uniforms.uResolution.value.set(width, height);
     },
-    set({ time, speed = 0, flash = 0, flashColor = null, dissolve = 0, power = 1, focus = null }) {
+    set({ time, speed = 0, flash = 0, flashColor = null, dissolve = 0, replay = 0, power = 1, focus = null }) {
       uniforms.uTime.value = time;
       uniforms.uSpeed.value = speed;
       uniforms.uFlash.value = flash;
       if (flashColor) uniforms.uFlashColor.value.copy(flashColor);
       uniforms.uDissolve.value = dissolve;
+      uniforms.uReplay.value = replay;
       uniforms.uPower.value = power;
       if (focus) uniforms.uFocus.value.copy(focus);
     },

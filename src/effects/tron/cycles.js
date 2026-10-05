@@ -18,6 +18,7 @@
 // primitives.
 import * as THREE from 'three';
 import { clamp, smoothstep } from './filters.js';
+import { STAGE } from './stage.js';
 import { lightPower } from './endofline.js';
 import { createJetwalls } from './jetwall3d.js';
 import { REZZ, buildLightCycle, createLightCycle, loadLightCycle } from './lightcycle-model.js';
@@ -47,6 +48,14 @@ export const CYCLE = {
   maxCycles: 4,
   nearClip: 0.9,           // things fade out between this depth and half a unit further
 };
+
+// A cycle somebody is about to get on (ride mode) rezzes between the hands
+// with its back to the camera, as if the user stood behind it: on the line
+// of sight through the middle of the hands, `distance` bike lengths away,
+// and tipped back just enough that the camera sees it a little from above
+// (the Grid's camera sits low, so a bike at hand height is above its eye).
+const MOUNT = { scale: 1.8, distance: 1.9, above: 8, maxPitch: 26 };   // degrees for the angles
+const DEGREES = Math.PI / 180;
 
 // the bike's length at scale 1, in floor units
 export const BIKE_LENGTH = 0.385;
@@ -122,8 +131,9 @@ export function createCycles({ view, teams, stage, grid3d, renderer, voxels, fla
   // pulled apart (it rides the whole floor); at: where it rezzes, in view
   // units; team: the owner's team. options.length: the bike's length on
   // screen (view units) while it rezzes; options.accent colours its wheels;
-  // options.mount: someone is getting on (ride mode), so it stays where it
-  // rezzed instead of dropping onto the floor and riding off.
+  // options.mount: someone is getting on (ride mode), so it rezzes with its
+  // back to the camera (placeMount) and stays there instead of dropping
+  // onto the floor and riding off.
   function launch(owner, at, team, { length = null, accent = null, mount = false } = {}) {
     while (cycles.filter((cycle) => cycle.state !== 'gone').length >= CYCLE.maxCycles) {
       derezz(cycles.find((cycle) => cycle.state !== 'gone'));
@@ -139,6 +149,7 @@ export function createCycles({ view, teams, stage, grid3d, renderer, voxels, fla
     const cycle = {
       owner,
       scale,
+      pitch: 0,
       length: bikeLength,
       teamIndex: team.index,
       color: team.color.clone(),
@@ -157,11 +168,58 @@ export function createCycles({ view, teams, stage, grid3d, renderer, voxels, fla
       bike: null,
       mount,
     };
+    if (mount) placeMount(cycle, at);
     cycle.bike = acquireBike(cycle);
     cycles.push(cycle);
     counts.launched++;
     log(`cycle ${owner[0].toUpperCase()}`);
     return cycle;
+  }
+
+  // Puts a cycle somebody is getting on where MOUNT says, its middle on
+  // screen at `at` (view units).
+  function placeMount(cycle, at) {
+    cycle.scale = MOUNT.scale;
+    cycle.length = BIKE_LENGTH * MOUNT.scale;
+    // the line of sight through `at`: (rayX, rayY, 1) from the camera, per unit of depth
+    const rayX = at.x - stage.vanish;
+    const rayY = at.y - STAGE.horizon;
+    const depth = (MOUNT.distance * cycle.length) / Math.hypot(rayX, rayY, 1);
+    const middleX = rayX * depth;
+    const middleH = STAGE.cameraHeight + rayY * depth;
+    const middleZ = stage.gridZ(depth);
+    // pointing away along it, the nose raised by the line's own climb and a little more
+    const yaw = Math.atan2(depth, middleX);
+    const climb = Math.atan2(rayY, Math.hypot(rayX, 1));
+    const pitch = clamp(climb + MOUNT.above * DEGREES, 0, MOUNT.maxPitch * DEGREES);
+    // from the middle back to the rear wheel's contact point (HUB_HEIGHT below the bike's axis)
+    const back = cycle.length / 2;
+    const down = HUB_HEIGHT * cycle.length;
+    cycle.heading = cycle.yaw = yaw;
+    cycle.pitch = pitch;
+    cycle.x = middleX - Math.cos(yaw) * (Math.cos(pitch) * back - Math.sin(pitch) * down);
+    cycle.z = middleZ - Math.sin(yaw) * (Math.cos(pitch) * back - Math.sin(pitch) * down);
+    cycle.h = cycle.dropFrom = middleH - Math.sin(pitch) * back - Math.cos(pitch) * down;
+  }
+
+  // Where the Grid's camera is as seen from a mounted cycle: its position in
+  // the bike's own frame (x forward, y up, z to its right; in bike lengths
+  // from the rear wheel's contact point), which way it is turned there, and
+  // its lens: vertical field of view (degrees) and where its optical axis
+  // falls on screen (view units). The ride starts its camera from there.
+  function mountView(cycle) {
+    const rotation = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, cycle.yaw, cycle.pitch));
+    const inverse = rotation.clone().invert();
+    const camera = new THREE.Vector3(0, STAGE.cameraHeight, -STAGE.gridScroll * now);
+    const position = camera.sub(new THREE.Vector3(cycle.x, cycle.h, -cycle.z)).applyQuaternion(inverse)
+      .divideScalar(cycle.length);
+    return {
+      position,
+      quaternion: inverse,
+      fov: 2 * Math.atan(0.5) / DEGREES,
+      shift: { x: stage.vanish, y: STAGE.horizon },
+      age: now - cycle.start,
+    };
   }
 
   // the height above the floor at which a point at `depth` shows at view y
@@ -346,6 +404,8 @@ export function createCycles({ view, teams, stage, grid3d, renderer, voxels, fla
       } else if (cycle.state === 'drop') {
         const progress = Math.min(1, (now - cycle.dropStart) / CYCLE.dropTime);
         cycle.h = cycle.dropFrom * (1 - progress * progress);
+        // (a cycle rezzed for a ride nobody got on levels out as it drops)
+        cycle.pitch *= 1 - progress;
         if (progress >= 1) {
           cycle.h = 0;
           cycle.state = 'ride';
@@ -424,7 +484,7 @@ export function createCycles({ view, teams, stage, grid3d, renderer, voxels, fla
     }
     bike.object.visible = lit > 0;
     bike.object.position.set(cycle.x, cycle.h, -cycle.z);
-    bike.object.rotation.set(0, cycle.yaw, 0);
+    bike.object.rotation.set(0, cycle.yaw, cycle.pitch);
     bike.setLength(cycle.length);
     bike.setLean(cycle.lean);
     bike.spin(cycle.spin);
@@ -495,21 +555,6 @@ export function createCycles({ view, teams, stage, grid3d, renderer, voxels, fla
     }
   }
 
-  // Where a cycle shows on screen: its middle (view units), its length on
-  // screen and which way its nose points (+1 right, -1 left).
-  function screenPose(cycle) {
-    const height = cycle.h + HUB_HEIGHT * cycle.length;
-    const tail = stage.project(cycle.x, height, cycle.z);
-    const nose = stage.project(cycle.x + Math.cos(cycle.yaw) * cycle.length, height,
-      cycle.z + Math.sin(cycle.yaw) * cycle.length);
-    return {
-      x: (tail.x + nose.x) / 2,
-      y: (tail.y + nose.y) / 2,
-      length: Math.hypot(nose.x - tail.x, nose.y - tail.y),
-      facing: nose.x >= tail.x ? 1 : -1,
-    };
-  }
-
   // a mounted cycle leaves the AR Grid quietly (the arena has taken over)
   function dismount(cycle) {
     const index = cycles.indexOf(cycle);
@@ -523,7 +568,7 @@ export function createCycles({ view, teams, stage, grid3d, renderer, voxels, fla
     group3d,               // in grid3d's scene: the bikes and their walls
     counts,
     launch,
-    screenPose,
+    mountView,
     dismount,
     shatter,
     powerDown,

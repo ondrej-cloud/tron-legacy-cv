@@ -1,5 +1,5 @@
 // Scripted hands for demo mode: a 50 s loop that runs through every gesture,
-// with a light cycle ride in the middle (about 22 s, while the loop holds).
+// with a light cycle ride in the middle (about 25 s, while the loop holds).
 // The hands are procedural (gestures.js) and go through the same analysis as
 // camera hands, so this exercises the real gesture rules. Like a real hand,
 // the palm stays put while the fingers change pose: keyframes place the palm
@@ -33,20 +33,27 @@
 //         ~31.3  the disc can't come home (the hand is gone) and fades out
 //   31.7 - 32.2  left hand comes to the baton's free end: GRAB (~32.4)
 //   32.6 - 33.1  the hands pull apart: the bar fills, the baton splits into its
-//                two handles and a big light cycle rezzes between the hands
+//                two handles and a light cycle rezzes between the hands, its
+//                back to the camera
 //         33.1   RIDE (ride/index.js): the loop holds here while it lasts. In
 //                seconds from the split (the match plays out the same way
 //                every time, at 60 fps; slower below that):
 //                 +0.0  the hands close into fists on the handlebars while the
-//                       cycle finishes rezzing
-//                 +1.7  hop on: the camera swoops down behind the cycle into
-//                       the arena, the camera picture shrinks into a corner
-//                 +3.0  round 1: 3, 2, 1 (CLU rezzes at the far end), GO (+5.4);
-//                       the fists tilt to steer, push forward to speed up
-//                +15.3  CLU rides into a jetwall and derezzes: CLU DEREZZED
-//                +17.5  TRON WINS, over a slow orbit of the arena
-//                +20.7  the arena breaks up into voxels, the camera picture
-//                       grows back and the Grid boots (+22.1); on from 34.3
+//                       cycle rezzes
+//                 +0.9  hop on: the arena takes over around the half-built
+//                       cycle and the camera pushes in behind it, into the
+//                       seat; the camera picture shrinks into a corner
+//                 +2.1  round 1: 3, 2, 1 (CLU rezzes at the far end), GO (+4.5);
+//                       the fists tilt to steer, push forward to speed up,
+//                       pull back to brake (the rear-view mirror comes up).
+//                       CLU hunts, boxes the player in, then breaks away;
+//                       the radar and the arrow at the screen's edge follow it
+//                +15.0  CLU is cut off by the player's jetwall: CLU DEREZZED,
+//                       then the kill-cam replays it in slow motion
+//                +20.4  TRON WINS: the score, the match's numbers, and the
+//                       rematch / END OF LINE prompts; demo mode carries on
+//                +23.9  the arena breaks up into voxels, the camera picture
+//                       grows back and the Grid boots (+25.4); on from 34.3
 //         34.9   right hand rock: CLU orange
 //   35.6 - 37.4  both hands draw one more wall each, beside the person
 //   37.65- 38.5  both fists come together and hold: END OF LINE (~38.5)

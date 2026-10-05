@@ -6,7 +6,8 @@ import * as THREE from 'three';
 const MAX = 1400;
 const GRAVITY = 9;
 
-export function createVoxels3d() {
+// groundAt(x, z): the height of the floor they bounce on
+export function createVoxels3d({ groundAt = () => 0 } = {}) {
   const geometry = new THREE.BoxGeometry(1, 1, 1);
   const material = new THREE.MeshBasicMaterial({
     color: 0xffffff,
@@ -72,8 +73,9 @@ export function createVoxels3d() {
         voxel.x += voxel.vx * dt;
         voxel.y += voxel.vy * dt;
         voxel.z += voxel.vz * dt;
-        if (voxel.y < voxel.size / 2) {
-          voxel.y = voxel.size / 2;
+        const floor = groundAt(voxel.x, voxel.z) + voxel.size / 2;
+        if (voxel.y < floor) {
+          voxel.y = floor;
           voxel.vy = Math.abs(voxel.vy) * 0.3;
         }
         const t = voxel.age / voxel.life;

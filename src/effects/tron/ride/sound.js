@@ -1,6 +1,8 @@
 // The ride's own sounds, synthesised like the rest of the app's (sfx.js):
 // countdown beeps, the GO, an engine hum that follows the speed, a derezz
-// crash and a short chord for the winner. A separate audio context, made
+// crash (deeper and longer when a replay plays it in slow motion), a rush
+// of air for a jump, a ping when CLU comes close, a short chord for the
+// winner and a rising tone for a rematch. A separate audio context, made
 // only after the page has had a user gesture (the browser wouldn't let it
 // play before), and silent whenever the music is muted (N).
 export function createRideSound(music) {
@@ -8,17 +10,28 @@ export function createRideSound(music) {
   let output = null;
   let engine = null;
   let noiseBuffer = null;
+  let lastAsked = -Infinity;   // when it last asked for the audio to start
 
   function ready() {
     if (music?.muted) return false;
+    // asking for the audio to start is slow enough to matter every frame
+    // (and a context without an output device stays suspended): a few
+    // times a second will do
+    const now = performance.now();
+    const ask = now - lastAsked > 500;
     if (!context) {
+      if (!ask) return false;
+      lastAsked = now;
       if (!navigator.userActivation?.hasBeenActive) return false;
       context = new AudioContext();
       output = context.createGain();
       output.gain.value = 0.7;
       output.connect(context.destination);
     }
-    if (context.state === 'suspended') context.resume();
+    if (context.state === 'suspended' && ask) {
+      lastAsked = now;
+      context.resume();
+    }
     return true;
   }
 
@@ -70,14 +83,35 @@ export function createRideSound(music) {
         noise(at, 0.08, 0.6, 600, 4000);
       }
     },
-    crash() {
+    // speed: 1 as it happens, less for a slow-motion replay (lower and longer)
+    crash(speed = 1) {
       if (!ready()) return;
       const at = context.currentTime;
-      noise(at, 0.35, 0.9, 5000, 300);
-      tone('sawtooth', 420, at, 0.1, 0.005, 0.7, 40);
-      tone('sine', 90, at, 0.4, 0.005, 0.6, 30);
+      const slow = 1 / Math.max(0.2, speed);
+      noise(at, 0.35, 0.9 * slow, 5000 * speed, 300 * speed);
+      tone('sawtooth', 420 * speed, at, 0.1, 0.005, 0.7 * slow, 40);
+      tone('sine', 90 * speed, at, 0.4, 0.005, 0.6 * slow, 30);
       // a glassy shatter: a few quick high blips
-      for (let k = 0; k < 6; k++) tone('triangle', 2000 + Math.random() * 3000, at + 0.03 + k * 0.045, 0.03, 0.002, 0.08);
+      for (let k = 0; k < 6; k++) {
+        tone('triangle', (2000 + Math.random() * 3000) * speed, at + (0.03 + k * 0.045) * slow, 0.03, 0.002, 0.08 * slow);
+      }
+    },
+    // off a kicker: a rush of air
+    jump() {
+      if (!ready()) return;
+      noise(context.currentTime, 0.06, 0.7, 900, 2600);
+    },
+    // CLU has come close
+    warn() {
+      if (!ready()) return;
+      const at = context.currentTime;
+      tone('sine', 1180, at, 0.035, 0.004, 0.12);
+      tone('sine', 1180, at + 0.14, 0.03, 0.004, 0.12);
+    },
+    // both palms open: the arena resets for another match
+    rematch() {
+      if (!ready()) return;
+      tone('sawtooth', 220, context.currentTime, 0.05, 0.05, 0.8, 880);
     },
     win(playerWon) {
       if (!ready()) return;

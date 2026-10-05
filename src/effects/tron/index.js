@@ -109,7 +109,7 @@ export function createEffect({ container, hands, host }) {
   const controls = createControls({ hands, view, teams, walls, discs, cycles, batons, digitizer, endOfLine,
     voxels, flashes, stage, log,
     onBatonCycle: (cycle, holderId) => ride.mount(cycle, teams[holderId].index, {
-      pose: () => cycles.screenPose(cycle),
+      view: () => cycles.mountView(cycle),
       dismount: () => cycles.dismount(cycle),
     }) });
   const hud = createHud(container, { hands, view, teams, controls, endOfLine });
