@@ -321,10 +321,14 @@ export function createBatons({ view, walls, voxels, flashes, log }) {
 
   // a derezz wave: batons within `radius` of `origin` collapse
   function derezzWithin(origin, radius) {
+    derezzWhere((center) => Math.hypot(center.x - origin.x, center.y - origin.y) < radius);
+  }
+
+  // batons whose centre `test(point)` accepts collapse (the Recognizer's beam)
+  function derezzWhere(test) {
     for (const id of IDS) {
       const baton = batons[id];
-      if (baton && baton.state !== 'collapsing'
-        && Math.hypot(baton.center.x - origin.x, baton.center.y - origin.y) < radius) release(id);
+      if (baton && baton.state !== 'collapsing' && test(baton.center)) release(id);
     }
   }
 
@@ -512,6 +516,7 @@ export function createBatons({ view, walls, voxels, flashes, log }) {
     release,
     split,
     derezzWithin,
+    derezzWhere,
     // a fresh Grid: no batons or handles
     clear() {
       batons.left = null;

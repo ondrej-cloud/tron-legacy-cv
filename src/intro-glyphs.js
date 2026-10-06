@@ -678,24 +678,266 @@ function shakaScene(context, t, w, h, s) {
   drawCycle(context, cycle.x, cycle.y, rez, s);
 }
 
+// A Recognizer seen from the front, as one outline (x across, y down, about
+// one unit wide, the tip of its head at 0, 0): the crossbeam, the head
+// hanging under it and two legs with knees and hooked feet. The same shape
+// as the 3D one in effects/tron/recognizer.js.
+const RECOGNIZER_HALF = [[0, -0.34], [0.33, -0.34], [0.43, -0.28], [0.5, 0.05], [0.5, 0.34], [0.47, 0.44],
+  [0.41, 0.46], [0.39, 0.37], [0.37, 0.05], [0.27, -0.18], [0.12, -0.18], [0.06, -0.03], [0, 0]];
+const RECOGNIZER_OUTLINE = [...RECOGNIZER_HALF, ...RECOGNIZER_HALF.slice(1, -1).reverse().map(([x, y]) => [-x, y])];
+
+function recognizerPath(cx, cy, size) {
+  const path = new Path2D();
+  RECOGNIZER_OUTLINE.forEach(([x, y], index) => {
+    if (index === 0) path.moveTo(cx + x * size, cy + y * size);
+    else path.lineTo(cx + x * size, cy + y * size);
+  });
+  path.closePath();
+  return path;
+}
+
+// Where the wall in the Recognizer glyph breaks up: fixed points along it.
+const WALL_BITS = Array.from({ length: 22 }, (_, index) => ({ along: (index + 0.5) / 22, drift: hash(index, 3) }));
+
+function recognizerScene(context, t, w, h, s) {
+  const pose = blendPoses(POSES.open, POSES.three, ramp(t, 0.1, 0.4) * (1 - ramp(t, 3.2, 3.5)));
+  hand(context, pose, { x: w * 0.13, y: h * 0.74, size: h * 0.24, roll: 0.1, physical: 'left' }, { scale: s });
+
+  // it flies in from the hand's side, slows over the middle and flies off
+  const flight = clamp01((t - 0.35) / 3.1);
+  const eased = flight - (0.8 / (2 * Math.PI)) * Math.sin(2 * Math.PI * flight);
+  const size = w * 0.5;
+  const cx = mix(-0.32 * w, 1.32 * w, eased);
+  const headY = h * 0.3;
+  const floorY = h * 0.92;
+  // a light wall on the floor: the cone breaks it into voxels as it passes
+  const wall = { x0: w * 0.42, x1: w * 0.88, y: h * 0.74, height: h * 0.12 };
+  const halfWidth = (y) => mix(w * 0.012, w * 0.1, (y - headY) / (floorY - headY));
+  // everything left of the cone's far edge has been scanned
+  let cut = cx + halfWidth(wall.y);
+  if (flight <= 0) cut = -Infinity;
+  else if (flight >= 1) cut = Infinity;
+  const fadeIn = ramp(t, 0.05, 0.35);
+  if (cut < wall.x1) {
+    const from = Math.max(wall.x0, cut);
+    drawRibbon(context, [{ x: from, y: wall.y - wall.height }, { x: wall.x1, y: wall.y - wall.height }],
+      { height: wall.height, alpha: fadeIn, body: 0.4, s });
+  }
+  context.save();
+  context.globalCompositeOperation = 'lighter';
+  for (const bit of WALL_BITS) {
+    const x = mix(wall.x0, wall.x1, bit.along);
+    const age = (Math.min(cut, w * 2) - x) / (w * 0.45);
+    if (age <= 0 || age > 1) continue;
+    const voxel = (1.3 + bit.drift * 1.4) * s;
+    const vx = x + (bit.drift - 0.5) * age * w * 0.25;
+    const vy = wall.y - wall.height * (0.2 + 0.6 * bit.drift) + age * h * 0.18 * (0.5 + bit.drift);
+    context.fillStyle = age < 0.08 ? `rgba(${WHITE}, ${1 - age})` : `rgba(${CYAN}, ${0.9 * (1 - age)})`;
+    context.fillRect(vx - voxel / 2, vy - voxel / 2, voxel, voxel);
+  }
+  context.restore();
+  if (flight <= 0 || flight >= 1) return;
+
+  // the cone of light from under its head down to the floor
+  context.save();
+  context.globalCompositeOperation = 'lighter';
+  const cone = new Path2D();
+  cone.moveTo(cx - halfWidth(headY), headY);
+  cone.lineTo(cx + halfWidth(headY), headY);
+  cone.lineTo(cx + halfWidth(floorY), floorY);
+  cone.lineTo(cx - halfWidth(floorY), floorY);
+  cone.closePath();
+  const beam = context.createLinearGradient(0, headY, 0, floorY);
+  beam.addColorStop(0, `rgba(${ORANGE}, 0.32)`);
+  beam.addColorStop(1, `rgba(${ORANGE}, 0.1)`);
+  context.fillStyle = beam;
+  context.fill(cone);
+  context.strokeStyle = `rgba(${ORANGE}, 0.55)`;
+  context.lineWidth = 0.8 * s;
+  context.stroke(cone);
+  context.strokeStyle = `rgba(${WHITE}, 0.8)`;
+  context.lineWidth = 1 * s;
+  context.beginPath();
+  context.ellipse(cx, floorY, halfWidth(floorY), h * 0.035, 0, 0, Math.PI * 2);
+  context.stroke();
+  // the Recognizer: a dim body inside a glowing orange outline
+  const body = recognizerPath(cx, headY, size);
+  context.fillStyle = `rgba(${ORANGE}, 0.1)`;
+  context.fill(body);
+  context.lineJoin = 'miter';
+  context.strokeStyle = `rgba(${ORANGE}, 0.25)`;
+  context.lineWidth = 4 * s;
+  context.stroke(body);
+  context.strokeStyle = `rgba(${ORANGE}, 0.95)`;
+  context.lineWidth = 1.2 * s;
+  context.stroke(body);
+  // the visor across its head
+  context.strokeStyle = `rgba(${WHITE}, 0.9)`;
+  context.lineWidth = 1 * s;
+  context.beginPath();
+  context.moveTo(cx - size * 0.07, headY - size * 0.12);
+  context.lineTo(cx + size * 0.07, headY - size * 0.12);
+  context.stroke();
+  context.restore();
+}
+
+// The viewfinder between two corners: brackets, a hairline, and a bar
+// under it that fills as the shot charges.
+function drawViewfinder(context, a, b, charge, alpha, s) {
+  const x0 = Math.min(a.x, b.x);
+  const x1 = Math.max(a.x, b.x);
+  const y0 = Math.min(a.y, b.y);
+  const y1 = Math.max(a.y, b.y);
+  const arm = Math.min(9 * s, (x1 - x0) / 4, (y1 - y0) / 4);
+  context.save();
+  context.globalCompositeOperation = 'lighter';
+  context.strokeStyle = `rgba(${CYAN}, ${0.3 * alpha})`;
+  context.lineWidth = 0.8 * s;
+  context.setLineDash([2 * s, 3 * s]);
+  context.strokeRect(x0, y0, x1 - x0, y1 - y0);
+  context.setLineDash([]);
+  context.strokeStyle = `rgba(${WHITE}, ${0.95 * alpha})`;
+  context.lineWidth = 1.3 * s;
+  context.beginPath();
+  for (const [x, y, dx, dy] of [[x0, y0, 1, 1], [x1, y0, -1, 1], [x1, y1, -1, -1], [x0, y1, 1, -1]]) {
+    context.moveTo(x + dx * arm, y);
+    context.lineTo(x, y);
+    context.lineTo(x, y + dy * arm);
+  }
+  context.stroke();
+  context.fillStyle = `rgba(${CYAN}, ${0.9 * alpha})`;
+  context.fillRect(x0, y1 + 3 * s, (x1 - x0) * charge, 1.2 * s);
+  context.restore();
+  return { x0, y0, x1, y1 };
+}
+
+// the corner of an L hand: between the thumb's base and the index knuckle
+const cornerOf = (points) => ({ x: (points[2].x + points[5].x) / 2, y: (points[2].y + points[5].y) / 2 });
+
+function snapshotScene(context, t, w, h, s) {
+  const size = h * 0.25;
+  const form = ramp(t, 0.1, 0.5) * (1 - ramp(t, 3.15, 3.5));
+  const pose = blendPoses(POSES.open, POSES.frame, form);
+  // left hand upside down at the top left, right hand at the bottom right
+  const inward = 1 - ramp(t, 0, 0.45);
+  const left = hand(context, pose, { x: w * (0.27 - 0.06 * inward), y: h * 0.26, size, roll: Math.PI,
+    physical: 'left', palmFacing: false }, { scale: s });
+  const right = hand(context, pose, { x: w * (0.73 + 0.06 * inward), y: h * 0.74, size, roll: 0,
+    physical: 'right' }, { scale: s });
+  const a = cornerOf(left);
+  const b = cornerOf(right);
+  const shotAt = 1.55;
+  const charge = ramp(t, 0.55, shotAt);
+  const finder = form > 0.6 && t < 2.9;
+  const rect = finder ? drawViewfinder(context, a, b, charge, Math.min(1, (form - 0.6) / 0.3) * (1 - ramp(t, 2.6, 2.9)), s) : null;
+  // the shutter: a flash over the frame
+  const flash = t > shotAt ? 1 - ramp(t, shotAt, shotAt + 0.35) : 0;
+  if (flash > 0 && rect) {
+    context.save();
+    context.globalCompositeOperation = 'lighter';
+    context.fillStyle = `rgba(${WHITE}, ${0.55 * flash})`;
+    context.fillRect(rect.x0, rect.y0, rect.x1 - rect.x0, rect.y1 - rect.y0);
+    context.restore();
+  }
+  // the picture shrinks from the frame into the corner and stays a moment
+  const slide = ramp(t, shotAt + 0.1, shotAt + 0.75);
+  const thumbAlpha = ramp(t, shotAt + 0.05, shotAt + 0.2) * (1 - ramp(t, 3.1, 3.45));
+  if (thumbAlpha <= 0 || !rect) return;
+  const target = { x0: w * 0.66, y0: h * 0.05, x1: w * 0.95, y1: h * 0.05 + w * 0.29 * 0.75 };
+  const box = {
+    x0: mix(rect.x0, target.x0, slide), y0: mix(rect.y0, target.y0, slide),
+    x1: mix(rect.x1, target.x1, slide), y1: mix(rect.y1, target.y1, slide),
+  };
+  context.save();
+  context.globalCompositeOperation = 'lighter';
+  const inside = context.createLinearGradient(0, box.y0, 0, box.y1);
+  inside.addColorStop(0, `rgba(${BLUE}, ${0.1 * thumbAlpha})`);
+  inside.addColorStop(1, `rgba(${BLUE}, ${0.28 * thumbAlpha})`);
+  context.fillStyle = inside;
+  context.fillRect(box.x0, box.y0, box.x1 - box.x0, box.y1 - box.y0);
+  // a tiny horizon and a wall in the picture
+  const midY = mix(box.y0, box.y1, 0.7);
+  context.strokeStyle = `rgba(${CYAN}, ${0.6 * thumbAlpha})`;
+  context.lineWidth = 0.8 * s;
+  context.beginPath();
+  context.moveTo(box.x0, midY);
+  context.lineTo(box.x1, midY);
+  context.moveTo(mix(box.x0, box.x1, 0.2), mix(box.y0, box.y1, 0.45));
+  context.lineTo(mix(box.x0, box.x1, 0.55), mix(box.y0, box.y1, 0.45));
+  context.stroke();
+  context.strokeStyle = `rgba(${WHITE}, ${0.95 * thumbAlpha})`;
+  context.lineWidth = 1 * s;
+  context.strokeRect(box.x0, box.y0, box.x1 - box.x0, box.y1 - box.y0);
+  context.restore();
+}
+
+function grabScene(context, t, w, h, s) {
+  const size = h * 0.25;
+  // a light wall: picked up at its first run, dragged down and right, let go
+  const drag = ramp(t, 1.0, 1.95);
+  const offset = { x: w * 0.16 * drag, y: h * 0.26 * drag };
+  const wallHeight = h * 0.13;
+  const route = [[0.08, 0.3], [0.36, 0.3], [0.36, 0.17], [0.6, 0.17]]
+    .map(([x, y]) => ({ x: w * x + offset.x, y: h * y + offset.y }));
+  const held = ramp(t, 0.75, 0.85) * (1 - ramp(t, 2.1, 2.2));
+  const wallAlpha = ramp(t, 0.05, 0.3) * (1 - ramp(t, 3.0, 3.4));
+  drawRibbon(context, route, { height: wallHeight, alpha: wallAlpha, body: 0.26 + 0.25 * held, lean: 0.45, s });
+  if (held > 0) drawLightLine(context, route, CYAN, 0.6 * held, s);
+
+  // the pinch point: on the wall while it is held, then off to catch a disc
+  const grip = { x: w * 0.22 + offset.x, y: h * 0.3 + wallHeight * 0.5 + offset.y };
+  const start = { x: w * 0.8, y: h * 0.8 };
+  const catchAt = { x: w * 0.72, y: h * 0.74 };
+  const toWall = ramp(t, 0.1, 0.6);
+  const away = ramp(t, 2.25, 2.6);
+  const at = {
+    x: mix(mix(start.x, grip.x, toWall), catchAt.x, away),
+    y: mix(mix(start.y, grip.y, toWall), catchAt.y, away),
+  };
+  const pinched = ramp(t, 0.6, 0.75) * (1 - ramp(t, 2.05, 2.25)) + ramp(t, 2.95, 3.05) * (1 - ramp(t, 3.3, 3.55));
+  const pose = blendPoses(POSES.open, POSES.pinch, pinched);
+  // place the hand by its pinch point
+  const probe = handPoints(pose, { x: 0, y: 0, size, roll: -0.15 });
+  const pinchX = (probe[4].x + probe[8].x) / 2;
+  const pinchY = (probe[4].y + probe[8].y) / 2;
+  drawHand(context, probe.map((point) => ({ x: point.x + at.x - pinchX, y: point.y + at.y - pinchY, z: point.z })),
+    { pose, scale: s });
+  if (held > 0.5 && t < 2.1) glowDot(context, at.x, at.y, 7 * s, CYAN, 0.8);
+  // a disc flies in from the left and the pinch snatches it out of the air
+  const discT = ramp(t, 2.45, 3.0);
+  const discAlpha = ramp(t, 2.45, 2.55) * (1 - ramp(t, 3.3, 3.55));
+  if (discAlpha <= 0) return;
+  const radius = h * 0.07;
+  const discX = mix(-radius, catchAt.x, discT);
+  const discY = catchAt.y - Math.sin(discT * Math.PI) * h * 0.08;
+  drawDisc(context, discX, discY, radius, discAlpha, s, t * (discT < 1 ? 14 : 3));
+  if (t > 3.0 && t < 3.3) glowDot(context, catchAt.x, catchAt.y, 12 * s, WHITE, 1 - (t - 3.0) / 0.3);
+}
+
 export const CONTROLS = [
   { id: 'point', name: 'Point', action: 'Draw a light wall', detail: 'Index finger only', scene: pointScene },
   { id: 'rock', name: 'Rock', action: 'Switch colour', detail: 'Index and pinky · cyan / orange, per hand',
     scene: rockScene },
   { id: 'ok', name: 'OK sign', action: 'Identity disc',
-    detail: 'Flick your hand to throw it; it bounces off walls and discs', scene: okScene },
+    detail: 'Flick to throw it; it bounces off walls and discs', scene: okScene },
+  { id: 'pinch', name: 'Pinch', action: 'Grab walls and discs',
+    detail: 'Drag a light wall, or snatch a thrown disc', scene: grabScene },
   { id: 'twoFists', name: 'Two fists', action: 'End of line', detail: 'Shuts the whole Grid down and reboots it',
     scene: twoFistsScene },
   { id: 'thumbsUp', name: 'Thumbs up', action: 'Launch a light cycle', detail: 'It rides out from your hand',
     scene: thumbsUpScene },
   { id: 'fist', name: 'Hold a fist', action: 'Derezz',
-    detail: 'Hold it for a moment to break everything around your hand', scene: fistScene },
+    detail: 'Hold it to break everything around your hand', scene: fistScene },
+  { id: 'three', name: 'Three fingers', action: 'Call the Recognizer',
+    detail: 'Its light cone derezzes what it flies over', scene: recognizerScene },
   { id: 'peace', name: 'Peace sign', action: 'Digitize yourself', detail: 'A laser sweep turns your outline into light',
     scene: peaceScene },
   { id: 'shaka', name: 'Shaka', action: 'Light baton',
-    detail: 'Grab the other end, pull apart and ride the cycle against CLU', scene: shakaScene },
+    detail: 'Pull it apart and race CLU on a light cycle', scene: shakaScene },
   { id: 'palms', name: 'Both palms open', action: 'Open a portal', detail: 'Palms toward the camera',
     scene: portalScene },
+  { id: 'frame', name: 'Frame it', action: 'Take a TRON photo',
+    detail: 'Two Ls at opposite corners, held still', scene: snapshotScene },
 ];
 
 // One looping glyph on a canvas. `offset` staggers the loops so the card

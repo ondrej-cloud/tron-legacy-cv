@@ -119,6 +119,69 @@ function classify(extended, touch, thumbUp, indexFolded) {
   return 'other';
 }
 
+// The two-hand photo frame: each hand makes an "L" with thumb and index, and
+// the two Ls sit at opposite corners of a rectangle, opening towards each
+// other (like a director framing a shot). Measured in the image plane only
+// (x, y; the depth estimate is too noisy for angles), lengths in palm sizes.
+// Pointing with both hands fails it in several ways: the thumbs are usually
+// tucked in, the index fingers point the same way, and an L that is there by
+// chance rarely opens towards the other hand.
+export const FRAME = {
+  thumbLength: 0.3,     // the thumb (base joint to tip) reaches at least this far across the image ...
+  indexLength: 0.5,     // ... and the index finger (knuckle to tip) this far
+  rightAngle: 0.5,      // |cos| between thumb and index below this: 60-120°
+  opposite: -0.6,       // cos between the two index fingers below this: pointing opposite ways
+  opening: 0.25,        // cos between each arm and the way to the other corner above this
+  minDiagonal: 2.0,     // the corners at least this far apart
+};
+
+// One hand's L, or null: thumb and index straight and roughly at a right
+// angle, the other three fingers folded, the thumb not touching the index.
+// Returns the corner where the arms meet and their directions (unit, 2D).
+export function frameCorner(points, analysis) {
+  const { extended } = analysis;
+  if (!extended.thumb || !extended.index || extended.middle || extended.ring || extended.pinky) return null;
+  if (analysis.touch.index < THRESHOLDS.touchOff) return null;
+  const palm = analysis.palmSize;
+  const thumb = flatDirection(points[2], points[4]);
+  const index = flatDirection(points[5], points[8]);
+  if (thumb.length < FRAME.thumbLength * palm || index.length < FRAME.indexLength * palm) return null;
+  if (Math.abs(thumb.x * index.x + thumb.y * index.y) > FRAME.rightAngle) return null;
+  return {
+    corner: { x: (points[2].x + points[5].x) / 2, y: (points[2].y + points[5].y) / 2 },
+    thumb,
+    index,
+  };
+}
+
+// a: { points, analysis } for one hand, b for the other; points in hand
+// space (or any space with equal x and y units). Returns { corners: [a, b],
+// diagonal } (diagonal in palm sizes) when the two hands frame a picture.
+export function detectFrame(a, b) {
+  const first = frameCorner(a.points, a.analysis);
+  const second = frameCorner(b.points, b.analysis);
+  if (!first || !second) return null;
+  const palm = (a.analysis.palmSize + b.analysis.palmSize) / 2;
+  const across = { x: second.corner.x - first.corner.x, y: second.corner.y - first.corner.y };
+  const span = Math.hypot(across.x, across.y);
+  if (span < FRAME.minDiagonal * palm) return null;
+  if (first.index.x * second.index.x + first.index.y * second.index.y > FRAME.opposite) return null;
+  // both arms of each L lean towards the other corner: the hands sit
+  // diagonally, each L opening into the picture
+  const towards = { x: across.x / span, y: across.y / span };
+  const opens = (corner, sign) => [corner.thumb, corner.index]
+    .every((arm) => sign * (arm.x * towards.x + arm.y * towards.y) > FRAME.opening);
+  if (!opens(first, 1) || !opens(second, -1)) return null;
+  return { corners: [first.corner, second.corner], diagonal: span / palm };
+}
+
+function flatDirection(from, to) {
+  const x = to.x - from.x;
+  const y = to.y - from.y;
+  const length = Math.hypot(x, y) || 1e-9;
+  return { x: x / length, y: y / length, length };
+}
+
 // Procedural hand for demo/mouse modes.
 
 // Pose presets: curl 0 = straight, 1 = fully curled; touch = how far the
@@ -134,6 +197,10 @@ export const POSES = {
   tapMiddle: { curl: { thumb: 0.3, index: 0, middle: 0.45, ring: 0, pinky: 0 }, touch: { middle: 1 } },
   tapRing:   { curl: { thumb: 0.35, index: 0, middle: 0, ring: 0.5, pinky: 0 }, touch: { ring: 1 } },
   tapPinky:  { curl: { thumb: 0.4, index: 0, middle: 0, ring: 0, pinky: 0.55 }, touch: { pinky: 1 } },
+  three:  { curl: { thumb: 0.85, index: 0, middle: 0, ring: 0, pinky: 1 }, touch: {} },
+  // one hand of the two-hand photo frame (detectFrame): thumb and index in an
+  // "L". On its own it classifies as a point; the thumb doesn't count there.
+  frame:  { curl: { thumb: -0.6, index: 0, middle: 1, ring: 1, pinky: 1 }, touch: {} },
 };
 
 export function blendPoses(from, to, amount) {

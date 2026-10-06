@@ -1,11 +1,12 @@
-// Scripted hands for demo mode: a 50 s loop that runs through every gesture,
+// Scripted hands for demo mode: a 60 s loop that runs through every gesture,
 // with a light cycle ride in the middle (about 25 s, while the loop holds).
 // The hands are procedural (gestures.js) and go through the same analysis as
 // camera hands, so this exercises the real gesture rules. Like a real hand,
 // the palm stays put while the fingers change pose: keyframes place the palm
 // where an open hand's pinch point would be (or place the index fingertip,
-// for drawing). While riding, the hands are two fists on the handlebars,
-// steered by an autopilot (see GRIP below).
+// for drawing; see key() below). While riding, the hands are two fists on
+// the handlebars, steered by an autopilot (see GRIP below). ?demoat=<s>
+// starts the loop that far in.
 //
 // Timeline (seconds into the loop; the effect needs ~0.25 s to react):
 //    0.0 -  2.6  both palms open, moving apart: portal, Grid floor lights up
@@ -46,29 +47,44 @@
 //                 +2.1  round 1: 3, 2, 1 (CLU rezzes at the far end), GO (+4.5);
 //                       the fists tilt to steer, push forward to speed up,
 //                       pull back to brake (the rear-view mirror comes up).
-//                       CLU hunts, boxes the player in, then breaks away;
-//                       the radar and the arrow at the screen's edge follow it
-//                +15.0  CLU is cut off by the player's jetwall: CLU DEREZZED,
+//                       CLU opens with a jump off the kicker ahead of it,
+//                       hunts, then boxes the player in; the radar and the
+//                       arrow at the screen's edge follow it
+//                +14.7  CLU is cut off by the player's jetwall: CLU DEREZZED,
 //                       then the kill-cam replays it in slow motion
-//                +20.4  TRON WINS: the score, the match's numbers, and the
+//                +20.1  TRON WINS: the score, the match's numbers, and the
 //                       rematch / END OF LINE prompts; demo mode carries on
-//                +23.9  the arena breaks up into voxels, the camera picture
-//                       grows back and the Grid boots (+25.4); on from 34.3
+//                +23.6  the arena breaks up into voxels, the camera picture
+//                       grows back and the Grid boots (+25.0); on from 34.3
 //         34.9   right hand rock: CLU orange
 //   35.6 - 37.4  both hands draw one more wall each, beside the person
-//   37.65- 38.5  both fists come together and hold: END OF LINE (~38.5)
-//   38.5 - 41.6  the Grid powers down: a derezz wave around the fists, then
-//                the walls go out run by run (~38.9 - 40.3), the HUD pieces
-//                switch off one by one (~39.0 - 39.8), the floor goes dark
-//                row by row (39.2 - 40.6), the horizon shrinks to a dot
-//                (40.6 - 41.55)
-//   41.75- 43.85 END OF LINE is typed in the dark, holds, collapses to a dot
-//         44.4   (in the app: back to the intro.) In demo mode, after half a
-//                second of darkness the Grid boots in place (44.9 - 46.5)
-//   46.8 - 50.0  both palms open again: portal (continues into the next loop)
+//   37.6 - 39.3  left hand makes "ok" (a cyan disc, ready ~38.3) and flicks it
+//                (~39.15) at the right hand, which waits pinching in its way:
+//                PINCH, it snatches the disc out of the air (~39.5)
+//   39.75- 41.05 left hand pinches its own wall: GRAB (~40.0), the wall glows,
+//                and the whole wall is dragged down and let go (~41.2)
+//         41.45  left hand, three fingers: the RECOGNIZER (~41.8) flies in from
+//                the left, slows down over the middle, sweeps its cone of light
+//                over the floor and flies off to the right (~47.4). The wall
+//                that was dragged down derezzes in its cone (~44.3)
+//   43.75- 45.3  both hands frame a picture, an L at the top left (upside down,
+//                back of the hand) and one at the bottom right: the viewfinder
+//                charges, SNAPSHOT (~44.55): a flash and a thumbnail sliding into
+//                the corner (demo mode saves nothing). The cone derezzes the
+//                disc in the right hand (~44.8)
+//   47.25- 48.0  both fists come together and hold: END OF LINE (~48.0)
+//   48.0 - 51.2  the Grid powers down: a derezz wave around the fists, then
+//                the walls go out run by run (~48.5 - 49.9), the HUD pieces
+//                switch off one by one (~48.6 - 49.4), the floor goes dark
+//                row by row (48.8 - 50.2), the horizon shrinks to a dot
+//                (50.2 - 51.15)
+//   51.35- 53.45 END OF LINE is typed in the dark, holds, collapses to a dot
+//         54.0   (in the app: back to the intro.) In demo mode, after half a
+//                second of darkness the Grid boots in place (54.5 - 56.1)
+//   56.4 - 59.6  both palms open again: portal (continues into the next loop)
 import { POSES, blendPoses, poseToLandmarks } from '../../gestures.js';
 
-export const DEMO_LOOP = 50;
+export const DEMO_LOOP = 59.6;
 const PALM = 0.13;   // palm length, as hands.js uses for procedural hands
 const PALM_POINTS = [0, 5, 9, 13, 17];
 const ROLL = { left: -0.08, right: 0.08 };
@@ -83,9 +99,20 @@ const DEMO_POSES = {
   thumbsUp: { curl: { thumb: -0.2, index: 1, middle: 1, ring: 1, pinky: 1 }, touch: {} },
 };
 
+// Keyframes place the hand by one of its points: `key` by where an open
+// hand's pinch point would be (so the palm stays put while the fingers
+// change), `tip` by the index fingertip, `grip` by this pose's own pinch
+// point (thumb and index tips) and `palm` by the palm centre.
 const key = (t, x, y, pose, options = {}) => ({ t, x, y, pose, anchor: 'pinch', ease: 'smooth', ...options });
 const tip = (t, x, y, pose, options = {}) => key(t, x, y, pose, { anchor: 'tip', ...options });
+const grip = (t, x, y, pose, options = {}) => key(t, x, y, pose, { anchor: 'grip', ...options });
+const palm = (t, x, y, pose, options = {}) => key(t, x, y, pose, { anchor: 'palm', ...options });
 const hidden = (t) => ({ t, hidden: true });
+// the photo frame's Ls: the right hand's at the bottom right, palm out,
+// index up and thumb pointing left; the left hand's at the top left, upside
+// down and showing its back, index down and thumb pointing right
+const FRAME_LEFT = { roll: Math.PI, palmFacing: false };
+const FRAME_RIGHT = { roll: 0 };
 
 // Fingertip keyframes along a polyline at constant speed (view units/s).
 function path(startTime, speed, points, aspect = 16 / 9) {
@@ -162,11 +189,20 @@ const RIGHT = [
   tip(35.85, 0.86, 0.25, 'point'),
   ...path(36.05, 0.5, [[0.86, 0.25], [0.72, 0.25], [0.72, 0.45], [0.62, 0.45]]),
   tip(37.4, 0.62, 0.45, 'point'),
-  key(37.65, 0.56, 0.55, 'fist'),         // the two fists come together ...
-  key(37.95, 0.505, 0.58, 'fist'),
-  key(39.9, 0.505, 0.58, 'fist'),         // ... and hold: END OF LINE, while the HUD switches off
-  hidden(40.0),
-  key(46.8, 0.66, 0.64, 'open'),
+  tip(37.55, 0.62, 0.45, 'open'),
+  grip(37.95, 0.75, 0.68, 'open'),        // waits in the way of the left hand's disc ...
+  grip(38.85, 0.75, 0.68, 'open'),
+  grip(39.0, 0.75, 0.68, 'pinch'),        // ... pinching: snatches it as it flies by (~39.6)
+  grip(43.6, 0.75, 0.68, 'pinch'),        // and keeps it
+  palm(44.0, 0.7, 0.74, 'frame', FRAME_RIGHT),   // the bottom right corner of a frame
+  palm(45.3, 0.7, 0.74, 'frame', FRAME_RIGHT),   // (the cone derezzes the disc in it, ~45.0)
+  grip(45.7, 0.75, 0.68, 'pinch'),
+  grip(46.9, 0.75, 0.68, 'pinch'),
+  key(47.25, 0.56, 0.55, 'fist'),         // the two fists come together ...
+  key(47.55, 0.505, 0.58, 'fist'),
+  key(49.5, 0.505, 0.58, 'fist'),         // ... and hold: END OF LINE, while the HUD switches off
+  hidden(49.6),
+  key(56.4, 0.66, 0.64, 'open'),
   key(DEMO_LOOP, 0.635, 0.62, 'open'),
 ];
 
@@ -207,11 +243,30 @@ const LEFT = [
   tip(35.85, 0.14, 0.25, 'point'),
   ...path(36.05, 0.5, [[0.14, 0.25], [0.28, 0.25], [0.28, 0.45], [0.38, 0.45]]),
   tip(37.4, 0.38, 0.45, 'point'),
-  key(37.65, 0.44, 0.55, 'fist'),
-  key(37.95, 0.495, 0.58, 'fist'),
-  key(39.9, 0.495, 0.58, 'fist'),
-  hidden(40.0),
-  key(46.8, 0.34, 0.66, 'open'),
+  tip(37.6, 0.38, 0.45, 'ok'),            // never open here, or the open right hand makes a portal
+  key(37.9, 0.3, 0.62, 'ok'),             // an identity disc (ready ~38.6)
+  key(38.95, 0.3, 0.62, 'ok'),
+  key(39.05, 0.28, 0.62, 'ok'),           // wind-up ...
+  key(39.3, 0.42, 0.62, 'ok', { ease: 'linear' }),   // ... and a flick at the right hand
+  key(39.45, 0.4, 0.62, 'open'),
+  grip(39.75, 0.33, 0.43, 'open'),        // to its wall ...
+  grip(39.9, 0.33, 0.43, 'pinch'),        // ... pinches it: GRAB (~40.1)
+  grip(40.2, 0.33, 0.43, 'pinch'),
+  grip(40.9, 0.4, 0.6, 'pinch'),          // drags the whole wall down
+  grip(41.05, 0.4, 0.6, 'open'),          // and lets go
+  key(41.3, 0.3, 0.6, 'open'),
+  key(41.45, 0.3, 0.6, 'three'),          // three fingers: the Recognizer (~41.85)
+  key(43.5, 0.3, 0.6, 'three'),
+  key(43.75, 0.31, 0.46, 'three', { roll: 1.6, palmFacing: false }),   // turns the hand over ...
+  palm(44.0, 0.31, 0.3, 'frame', FRAME_LEFT),    // ... into the top left corner: SNAPSHOT (~44.7)
+  palm(45.3, 0.31, 0.3, 'frame', FRAME_LEFT),
+  key(45.7, 0.27, 0.62, 'open'),
+  key(46.9, 0.27, 0.62, 'open'),
+  key(47.25, 0.44, 0.55, 'fist'),
+  key(47.55, 0.495, 0.58, 'fist'),
+  key(49.5, 0.495, 0.58, 'fist'),
+  hidden(49.6),
+  key(56.4, 0.34, 0.66, 'open'),
   key(DEMO_LOOP, 0.365, 0.62, 'open'),
 ];
 
@@ -232,13 +287,15 @@ const RIDE_RESUME = 34.3;
 // hands on the handlebars should do
 export function createDemo({ ride = null } = {}) {
   let currentTime = 0;
-  let offset = 0;            // demo clock time minus timeline time
+  // ?demoat=<s>: start the loop that far in (screenshots of a later part)
+  const startAt = Number(new URLSearchParams(location.search).get('demoat')) || 0;
+  let offset = -startAt;     // demo clock time minus timeline time
   let paused = null;         // { at: timeline time, since: clock time } while riding
 
   // Viewport offsets from the pinch midpoint (what hands.js positions) to the
   // index fingertip and to the palm centre, for a pose.
-  function offsets(pose, physical, roll, aspect, size = PALM) {
-    const points = poseToLandmarks({ x: 0, y: 0, size, roll, physical }, pose);
+  function offsets(pose, physical, roll, aspect, size = PALM, palmFacing = true) {
+    const points = poseToLandmarks({ x: 0, y: 0, size, roll, physical, palmFacing }, pose);
     const midX = (points[4].x + points[8].x) / 2;
     const midY = (points[4].y + points[8].y) / 2;
     let palmX = 0;
@@ -254,13 +311,16 @@ export function createDemo({ ride = null } = {}) {
   }
 
   const rollOf = (frame, physical) => frame.roll ?? ROLL[physical];
+  const facingOf = (frame) => frame.palmFacing ?? true;
 
   // where a keyframe puts the palm centre
   function palmPoint(frame, physical, aspect) {
-    const own = offsets(DEMO_POSES[frame.pose], physical, rollOf(frame, physical), aspect);
+    if (frame.anchor === 'palm') return { x: frame.x, y: frame.y };
+    const own = offsets(DEMO_POSES[frame.pose], physical, rollOf(frame, physical), aspect, PALM, facingOf(frame));
     if (frame.anchor === 'tip') {
       return { x: frame.x - own.tip.x + own.palm.x, y: frame.y - own.tip.y + own.palm.y };
     }
+    if (frame.anchor === 'grip') return { x: frame.x + own.palm.x, y: frame.y + own.palm.y };
     const open = offsets(POSES.open, physical, ROLL[physical], aspect);
     return { x: frame.x + open.palm.x, y: frame.y + open.palm.y };
   }
@@ -284,14 +344,16 @@ export function createDemo({ ride = null } = {}) {
     const tremorY = 0.0022 * Math.sin(time * 6.1 + phase * 3) + 0.0012 * Math.sin(time * 14.3 + phase);
     const rollFrom = rollOf(from, physical);
     const roll = rollFrom + (rollOf(target, physical) - rollFrom) * smooth;
+    // a hand turning its palm away flips over halfway
+    const palmFacing = facingOf(smooth < 0.5 ? from : target);
     const pose = blendPoses(DEMO_POSES[from.pose], DEMO_POSES[target.pose], smooth);
-    const palm = offsets(pose, physical, roll, aspect).palm;
+    const palm = offsets(pose, physical, roll, aspect, PALM, palmFacing).palm;
     return {
       x: a.x + (b.x - a.x) * moveAmount - palm.x + tremorX,
       y: a.y + (b.y - a.y) * moveAmount - palm.y + tremorY,
       physical,
       roll,
-      palmFacing: true,
+      palmFacing,
       pose,
     };
   }

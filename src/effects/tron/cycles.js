@@ -363,8 +363,15 @@ export function createCycles({ view, teams, stage, grid3d, renderer, voxels, fla
   // a derezz wave: cycles and stretches of their walls within `radius` of `origin` (view units)
   function shatter(origin, radius, bornBefore) {
     const radiusSquared = radius * radius;
-    const within = (point) => (point.x - origin.x) ** 2 + (point.y - origin.y) ** 2 < radiusSquared;
+    shatterWhere((point) => (point.x - origin.x) ** 2 + (point.y - origin.y) ** 2 < radiusSquared, bornBefore, origin);
+  }
+
+  // Cycles, and stretches of their walls, that `within(point)` accepts (view
+  // units); the voxels fly away from `origin`. `spareMounted` leaves a cycle
+  // somebody is getting on alone (ride mode takes it over).
+  function shatterWhere(within, bornBefore = Infinity, origin = null, { spareMounted = false } = {}) {
     for (const cycle of cycles) {
+      if (spareMounted && cycle.mount) continue;
       if (cycle.state !== 'gone' && cycle.start < bornBefore && within(centerOf(cycle))) derezz(cycle);
       const wallHeight = CYCLE.wallHeight * cycle.length;
       for (const sample of cycle.path) {
@@ -376,7 +383,7 @@ export function createCycles({ view, teams, stage, grid3d, renderer, voxels, fla
         const top = stage.project(sample.x, wallHeight, sample.z);
         voxels.spawn({
           x: (base.x + top.x) / 2, y: (base.y + top.y) / 2,
-          vx: (base.x - origin.x) * 0.4 + (Math.random() - 0.5) * 0.1, vy: 0.05 + Math.random() * 0.15,
+          vx: (origin ? (base.x - origin.x) * 0.4 : 0) + (Math.random() - 0.5) * 0.1, vy: 0.05 + Math.random() * 0.15,
           size: Math.max(0.005, (top.y - base.y) * 0.3),
           life: 1.0 + Math.random() * 0.8,
           heat: 0.6,
@@ -571,6 +578,7 @@ export function createCycles({ view, teams, stage, grid3d, renderer, voxels, fla
     mountView,
     dismount,
     shatter,
+    shatterWhere,
     powerDown,
     segments: viewSegments,
     // a disc struck a jetwall `along` view units into the segment it hit

@@ -6,7 +6,9 @@
 // around it. When the Grid powers down, the pieces of the HUD switch off
 // one by one like an old screen (a flicker, a squash to a bright line, a
 // dot), and END OF LINE is typed in the dark, then switched off the same
-// way. Thin crisp lines, a faint flicker and scanlines.
+// way. Two hands framing a picture get a viewfinder between them that
+// charges up to the snapshot. Thin crisp lines, a faint flicker and
+// scanlines.
 import { HAND_CONNECTIONS } from '../../hands.js';
 
 const HUD = {
@@ -21,6 +23,7 @@ const HUD = {
 const FINGERS = ['thumb', 'index', 'middle', 'ring', 'pinky'];
 const GESTURE_NAMES = { thumbsUp: 'THUMBS UP', none: '' };
 const WHITE = '226, 250, 255';
+const CYAN = '111, 243, 255';
 
 export function createHud(container, { hands, view, teams, controls, endOfLine }) {
   const canvas = document.createElement('canvas');
@@ -331,6 +334,82 @@ export function createHud(container, { hands, view, teams, controls, endOfLine }
     }
   }
 
+  // The viewfinder between two framing hands: corner brackets, a hairline
+  // outline with thirds, a bar along the bottom that fills as the shot
+  // charges, and the whole frame flashing white when it is taken.
+  function drawFrame(nowMs) {
+    const frame = controls.frame;
+    if (!frame.corners || !endOfLine.hudOn) return;
+    const sinceShot = (nowMs - frame.firedMs) / 1000;
+    const flash = sinceShot >= 0 && sinceShot < 0.6 ? 1 - sinceShot / 0.6 : 0;
+    if (frame.charge <= 0 && flash <= 0) return;
+    const [a, b] = frame.corners.map(toScreen);
+    const x0 = Math.min(a.x, b.x);
+    const x1 = Math.max(a.x, b.x);
+    const y0 = Math.min(a.y, b.y);
+    const y1 = Math.max(a.y, b.y);
+    const width = x1 - x0;
+    const height = y1 - y0;
+    drawn.push([x0 - 24, y0 - 34, width + 48, height + 64]);
+    const color = flash > 0 ? WHITE : CYAN;
+    const alpha = Math.min(1, 0.55 + frame.charge * 0.45 + flash);
+    context.save();
+    context.lineWidth = 1;
+    context.strokeStyle = `rgba(${color}, ${0.35 * alpha})`;
+    context.setLineDash([3, 5]);
+    context.strokeRect(x0 + 0.5, y0 + 0.5, width, height);
+    context.setLineDash([]);
+    // thirds, very faint
+    context.strokeStyle = `rgba(${color}, ${0.12 * alpha})`;
+    context.beginPath();
+    for (const k of [1, 2]) {
+      context.moveTo(x0 + (width * k) / 3, y0);
+      context.lineTo(x0 + (width * k) / 3, y1);
+      context.moveTo(x0, y0 + (height * k) / 3);
+      context.lineTo(x1, y0 + (height * k) / 3);
+    }
+    context.stroke();
+    // corner brackets and a crosshair in the middle
+    const arm = Math.min(26, width / 4, height / 4);
+    context.lineWidth = 2;
+    context.strokeStyle = `rgba(${color}, ${alpha})`;
+    context.shadowColor = `rgba(${CYAN}, 0.9)`;
+    context.shadowBlur = 8;
+    context.beginPath();
+    for (const [x, y, dx, dy] of [[x0, y0, 1, 1], [x1, y0, -1, 1], [x1, y1, -1, -1], [x0, y1, 1, -1]]) {
+      context.moveTo(x + dx * arm, y);
+      context.lineTo(x, y);
+      context.lineTo(x, y + dy * arm);
+    }
+    const midX = (x0 + x1) / 2;
+    const midY = (y0 + y1) / 2;
+    context.moveTo(midX - 7, midY);
+    context.lineTo(midX + 7, midY);
+    context.moveTo(midX, midY - 7);
+    context.lineTo(midX, midY + 7);
+    context.stroke();
+    // the charge, as a bar under the bottom edge
+    const charge = flash > 0 ? 1 : frame.charge;
+    context.fillStyle = `rgba(${color}, ${0.9 * alpha})`;
+    context.fillRect(x0, y1 + 6, width * charge, 2);
+    context.fillStyle = `rgba(${color}, ${0.18 * alpha})`;
+    context.fillRect(x0 + width * charge, y1 + 6, width * (1 - charge), 2);
+    context.restore();
+    const label = flash > 0 ? 'SNAPSHOT' : `FRAME ${Math.round(frame.charge * 100)}%`;
+    glowText(label, x0, y0 - 10, color, alpha, 10, { weight: 700, spacing: 0.25 });
+    // a recording dot that blinks while it charges
+    if (flash <= 0 && Math.floor(nowMs / 400) % 2 === 0) {
+      context.fillStyle = 'rgba(255, 80, 60, 0.95)';
+      context.beginPath();
+      context.arc(x1 - 4, y0 - 14, 3, 0, Math.PI * 2);
+      context.fill();
+    }
+    if (flash > 0) {
+      context.fillStyle = `rgba(${WHITE}, ${0.25 * flash})`;
+      context.fillRect(x0, y0, width, height);
+    }
+  }
+
   // END OF LINE, typed in the dark in the middle of the screen between two
   // rules; then switched off like an old TV: squashed to a bright line,
   // the line shrinks to a dot, the dot fades.
@@ -416,6 +495,7 @@ export function createHud(container, { hands, view, teams, controls, endOfLine }
       }
       for (const id of ['left', 'right']) if (!hands[id].visible) boxes[id] = null;
       drawCharges();
+      drawFrame(nowMs);
       context.globalAlpha = 1;
       context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
       drawEndOfLine(seconds);

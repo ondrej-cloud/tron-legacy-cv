@@ -4,8 +4,9 @@
 // jetwalls (a swept test, so a fast disc can't tunnel through a thin wall),
 // two thrown discs bounce off each other, and a light baton bats a disc
 // away. Once the ricochets settle it homes back to its owner and is caught
-// by an open hand (a closed hand makes it circle and wait). If the owner's
-// hand is gone, the disc fades out. Each disc has its hand's colour.
+// by an open hand (a closed hand makes it circle and wait); a pinch can
+// snatch any thrown disc out of the air (snatch()). If the owner's hand is
+// gone, the disc fades out. Each disc has its hand's colour.
 import * as THREE from 'three';
 import { additiveMaterial, uploadPrefix } from './gl.js';
 import { clamp, easeTowards } from './filters.js';
@@ -587,6 +588,34 @@ export function createDiscs({ view, teams, walls, cycles = null, batons, stage, 
         if (disc.state === 'gone' || disc.state === 'fading') continue;
         if (Math.hypot(disc.x - origin.x, disc.y - origin.y) < radius + disc.radius * 0.5) shatter(disc);
       }
+    },
+    // the Recognizer's beam: every disc whose centre `test(point)` accepts shatters
+    shatterWhere(test) {
+      for (const disc of discs) {
+        if (disc.state !== 'gone' && disc.state !== 'fading' && test(disc)) shatter(disc);
+      }
+    },
+    // A pinch snatches a thrown disc out of the air: the nearest one within
+    // `reach` (plus its own radius) of `point`. It becomes the catching
+    // hand's disc, even if the other hand threw it. Returns the disc or null.
+    snatch(owner, point, reach) {
+      let best = null;
+      let bestDistance = Infinity;
+      for (const disc of discs) {
+        if (!thrown(disc)) continue;
+        const distance = Math.hypot(disc.x - point.x, disc.y - point.y) - disc.radius;
+        if (distance < reach && distance < bestDistance) {
+          best = disc;
+          bestDistance = distance;
+        }
+      }
+      if (!best) return null;
+      const mine = discs.find((disc) => disc.owner === owner && disc.state !== 'fading' && disc.state !== 'gone');
+      if (mine && mine !== best) return null;   // one disc per hand
+      best.owner = owner;
+      best.trail.length = 0;
+      catchDisc(best);
+      return best;
     },
     // put away: a held disc fades out of the hand (a baton takes its place)
     dismiss(disc) {

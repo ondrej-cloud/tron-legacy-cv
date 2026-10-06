@@ -5,9 +5,11 @@
 // apart, it rezzes a light cycle that you hop on and ride in a duel against
 // CLU, your fists held like handlebars: ride/), derezz what is around a
 // fist, open a portal between the hands, digitize the person on camera with
-// a laser (person segmentation), and shut the whole Grid down with END OF
-// LINE; a holographic HUD shows what the hand tracker sees (the rules are in
-// controls.js).
+// a laser (person segmentation), call a Recognizer whose cone of light
+// derezzes what it flies over, drag walls and snatch discs with a pinch,
+// frame a picture with both hands to take a snapshot, and shut the whole
+// Grid down with END OF LINE; a holographic HUD shows what the hand tracker
+// sees (the rules are in controls.js).
 //
 // Most of the scene is flat, in "view units": the frame is 1 unit tall, x
 // runs from -aspect/2 to +aspect/2, y points up, (0, 0) is the centre of the
@@ -32,6 +34,8 @@ import { createDiscs } from './disc.js';
 import { createCycles } from './cycles.js';
 import { createBatons } from './baton.js';
 import { createDigitizer } from './digitize.js';
+import { createRecognizer } from './recognizer.js';
+import { createSnapshot } from './snapshot.js';
 import { createEndOfLine, POWER_DOWN_LENGTH } from './endofline.js';
 import { cssFilter } from './grade.js';
 import { createControls } from './controls.js';
@@ -43,7 +47,8 @@ export const meta = {
   title: 'Tron',
   hint: 'point: light wall · rock: switch colour · ok: identity disc, flick to throw · '
     + 'thumbs up: light cycle · peace: digitize · shaka: light baton · fist (hold): derezz · '
-    + 'two fists together: end of line · both palms open: portal · '
+    + 'two fists together: end of line · both palms open: portal · three fingers: recognizer · '
+    + 'pinch: grab a wall or a disc · both hands framing a picture: snapshot · '
     + 'baton pulled apart: ride a light cycle, fists as handlebars (or R, arrow keys)',
 };
 
@@ -92,6 +97,9 @@ export function createEffect({ container, hands, host }) {
   const cycles = createCycles({ view, teams, stage, grid3d, renderer, voxels, flashes, log });
   const discs = createDiscs({ view, teams, walls, cycles, batons, stage, voxels, flashes, log });
   const digitizer = createDigitizer({ hands, view, voxels, flashes, log });
+  const recognizer = createRecognizer({ grid3d, stage, view });
+  recognizer.precompile(renderer).catch((error) => console.warn('recognizer: shaders not precompiled', error));
+  const snapshot = createSnapshot({ hands, canvas: renderer.domElement, onShutter: () => host?.sfx?.key() });
   // the music dies with the lights (the host starts the Grid track again on
   // entering), the words are typed with key clicks and switch off with a click
   const endOfLine = createEndOfLine({
@@ -101,13 +109,14 @@ export function createEffect({ container, hands, host }) {
     onCollapse: () => host?.sfx?.crtOff(),
   });
   backScene.add(stage.group, digitizer.group);
-  grid3d.scene.add(cycles.group3d);
+  grid3d.scene.add(cycles.group3d, recognizer.group);
   frontScene.add(cycles.group, walls.object, discs.group, batons.group, voxels.mesh, flashes.group);
   // a light cycle duel against CLU, entered by pulling a baton apart (ride/)
   const ride = createRide({ renderer, container, hands, host, teams, endOfLine, view, log,
     envMap: grid3d.environment, onExit: () => afterRide() });
   const controls = createControls({ hands, view, teams, walls, discs, cycles, batons, digitizer, endOfLine,
-    voxels, flashes, stage, log,
+    voxels, flashes, stage, recognizer, log,
+    onSnapshot: (frame) => snapshot.request(frame, view),
     onBatonCycle: (cycle, holderId) => ride.mount(cycle, teams[holderId].index, {
       view: () => cycles.mountView(cycle),
       dismount: () => cycles.dismount(cycle),
@@ -178,6 +187,8 @@ export function createEffect({ container, hands, host }) {
     flashes.clear();
     stage.reset();
     digitizer.cancel();
+    recognizer.clear();
+    snapshot.clear();
     controls.reset();
     teams.reset();
     hud.reset();
@@ -241,6 +252,7 @@ export function createEffect({ container, hands, host }) {
       voxels.update(seconds);
       flashes.update(seconds);
       stage.update(seconds, controls.portal, controls.tethers, cycles.lights(), endOfLine.light());
+      recognizer.update(seconds);
       // after the stage, so the cycles are projected with this frame's floor
       grid3d.update(seconds, view.aspect, stage.vanish);
       cycles.draw();
@@ -251,6 +263,8 @@ export function createEffect({ container, hands, host }) {
       else {
         ride.warmup();
         composer.render();
+        // the WebGL canvas only holds this frame until the task ends
+        snapshot.capture();
       }
       hud.draw(lastMs, seconds, { hands: !ride.covering });
     },
@@ -275,6 +289,11 @@ export function createEffect({ container, hands, host }) {
         digitize: { active: digitizer.active, count: digitizer.count, segmenter: digitizer.segmenterStatus,
           runs: digitizer.segmenterRuns, masks: digitizer.maskFrames },
         portal: Number(controls.portal.strength.toFixed(2)),
+        recognizer: { flying: recognizer.busy, called: recognizer.counts.called,
+          beam: Number(recognizer.beam.strength.toFixed(2)) },
+        pinch: { ...controls.pinchCounts },
+        frame: Number(controls.frame.charge.toFixed(2)),
+        snapshots: { ...snapshot.counts },
         derezz: controls.counts.derezz,
         endOfLine: endOfLine.count,
         teamSwitches: controls.counts.teamSwitches,

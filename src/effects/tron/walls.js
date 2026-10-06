@@ -9,7 +9,8 @@
 // colour of the hand that draws it. Walls fade after a few seconds, the
 // oldest go first when there is too much, thrown discs bounce off them
 // (segments() and pulse()), and derezz waves and light batons break them
-// (shatterWhere()); a freshly broken end glows for a moment. When the Grid
+// (shatterWhere()); a freshly broken end glows for a moment. A pinch picks
+// a whole wall up and drags it along (nearest(), move()). When the Grid
 // powers down, the walls go out run by run (powerDown()).
 import * as THREE from 'three';
 import { additiveMaterial, quadIndices, uploadPrefix } from './gl.js';
@@ -330,6 +331,69 @@ export function createLightWalls(view, teams) {
     }
   }
 
+  // The finished wall nearest to `point` (view units) within `reach`, as
+  // { trail, along }, or null. Distance is measured to the wall's middle
+  // line, less half its height, so pinching anywhere on the glass counts.
+  function nearest(point, reach, now) {
+    const halfHeight = Math.hypot(extrude.x, extrude.y) / 2;
+    let best = null;
+    let bestDistance = reach;
+    for (const trail of trails) {
+      if (trail.active) continue;
+      const samples = trail.samples;
+      for (let index = 1; index < samples.length; index++) {
+        const a = samples[index - 1];
+        const b = samples[index];
+        if (a.gone || b.gone || sampleAlpha(a, now) < WALL.solidAlpha) continue;
+        const ax = a.x + extrude.x / 2;
+        const ay = a.y + extrude.y / 2;
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const lengthSquared = dx * dx + dy * dy || 1e-12;
+        const t = Math.min(1, Math.max(0, ((point.x - ax) * dx + (point.y - ay) * dy) / lengthSquared));
+        const distance = Math.hypot(point.x - ax - dx * t, point.y - ay - dy * t) - halfHeight;
+        if (distance < bestDistance) {
+          bestDistance = distance;
+          best = { trail, along: a.along + (b.along - a.along) * t };
+        }
+      }
+    }
+    return best;
+  }
+
+  // A wall picked up by a pinch: it glows, moves as a whole with the hand
+  // (move()) and is lit afresh, so it fades only a while after it is put
+  // down, like a newly drawn one.
+  function grab(trail, grabbed, now) {
+    trail.grabbed = grabbed;
+    if (!grabbed) return;
+    for (const sample of trail.samples) sample.born = Math.max(sample.born, now - WALL.hotTime);
+  }
+
+  function move(trail, dx, dy, dt) {
+    for (const sample of trail.samples) {
+      sample.x += dx;
+      sample.y += dy;
+      sample.born += dt;
+      if (sample.dieAt !== Infinity) sample.dieAt += dt;
+    }
+    for (const point of [trail.head, trail.corner]) {
+      point.x += dx;
+      point.y += dy;
+    }
+  }
+
+  // A wall that turned out not to be one (the start of a two-hand frame
+  // gesture, see controls.js) goes away without breaking up.
+  function discard(trail) {
+    const index = trails.indexOf(trail);
+    if (index < 0) return;
+    for (const sample of trail.samples) {
+      if (!sample.gone && sample.dieAt === Infinity) livingSamples--;
+    }
+    trails.splice(index, 1);
+  }
+
   // a fresh Grid: no walls at all
   function clear() {
     trails.length = 0;
@@ -400,8 +464,11 @@ export function createLightWalls(view, teams) {
     };
     const hasPulses = pulses.length > 0;
     const cutHeat = (point) => (point.cutAt === undefined ? 0 : 1 - smoothstep(0, WALL.cutGlow, now - point.cutAt));
+    // a wall held by a pinch glows, with a slow throb
+    const grabHeat = 0.8 + 0.2 * Math.sin(now * 7);
     const end = (trail, point, alpha, team) => {
-      const fresh = Math.max(1 - smoothstep(0, WALL.hotTime, now - point.born), cutHeat(point));
+      let fresh = Math.max(1 - smoothstep(0, WALL.hotTime, now - point.born), cutHeat(point));
+      if (trail.grabbed) fresh = Math.max(fresh, grabHeat);
       const heat = hasPulses ? Math.max(fresh, pulseHeat(trail, point.along, now)) : fresh;
       return {
         base: point,
@@ -429,8 +496,9 @@ export function createLightWalls(view, teams) {
       }
       const first = samples[0];
       const last = lastSample(trail);
-      if (first && !first.gone && samples.length > 1) addEdge(first, first.team, 0, sampleAlpha(first, now));
-      if (!trail.active && last && !last.gone && samples.length > 1) addEdge(last, last.team, 0, sampleAlpha(last, now));
+      const endHeat = trail.grabbed ? grabHeat : 0;
+      if (first && !first.gone && samples.length > 1) addEdge(first, first.team, endHeat, sampleAlpha(first, now));
+      if (!trail.active && last && !last.gone && samples.length > 1) addEdge(last, last.team, endHeat, sampleAlpha(last, now));
       if (!trail.active || !last || last.gone) continue;
       const head = { x: trail.head.x, y: trail.head.y, born: now,
         along: last.along + Math.hypot(trail.head.x - last.x, trail.head.y - last.y) };
@@ -468,6 +536,10 @@ export function createLightWalls(view, teams) {
     finish,
     shatter,
     shatterWhere,
+    nearest,
+    grab,
+    move,
+    discard,
     segments,
     powerDown,
     clear,

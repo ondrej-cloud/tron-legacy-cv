@@ -260,7 +260,7 @@ body.intro-open .sd-ui { visibility: hidden; }
 
 .intro-stage {
   position: relative;
-  width: min(100%, 1060px);
+  width: min(100%, 1320px);
   margin-top: clamp(14px, 4.5vh, 56px);
   flex-shrink: 0;
 }
@@ -482,8 +482,8 @@ body.intro-open .sd-ui { visibility: hidden; }
 }
 
 .intro-controls {
-  --columns: 3;
-  --gap: clamp(12px, 2vw, 28px);
+  --columns: 4;
+  --gap: clamp(12px, 1.6vw, 26px);
   position: relative;
   list-style: none;
   margin: 0;
@@ -509,13 +509,13 @@ body.intro-open .sd-ui { visibility: hidden; }
 }
 
 /* a hairline above every row but the first */
-.intro-control:nth-child(n + 4) { border-top: 1px solid rgba(111, 243, 255, 0.08); }
+.intro-control:nth-child(n + 5) { border-top: 1px solid rgba(111, 243, 255, 0.08); }
 
 .intro-manual.is-on .intro-control,
 .intro-manual.is-on .intro-manual-head { opacity: 1; transform: none; }
 
 .intro-glyph {
-  width: clamp(76px, min(7.6vw, 11vh), 120px);
+  width: clamp(64px, min(5.8vw, 10vh), 96px);
   aspect-ratio: 4 / 3;
   background:
     linear-gradient(var(--cyan), var(--cyan)) left top / 7px 1px,
@@ -537,7 +537,7 @@ body.intro-open .sd-ui { visibility: hidden; }
 
 .intro-control .action {
   margin: 0;
-  font: 600 clamp(16px, 1.45vw, 20px)/1.15 var(--ui-font);
+  font: 600 clamp(15px, 1.25vw, 19px)/1.15 var(--ui-font);
   letter-spacing: 0.02em;
   color: var(--white);
   text-shadow: 0 0 12px rgba(0, 200, 255, 0.45);
@@ -549,7 +549,7 @@ body.intro-open .sd-ui { visibility: hidden; }
 
 .intro-control .detail {
   margin: 3px 0 0;
-  font-size: 13.5px;
+  font-size: 13px;
   line-height: 1.25;
   color: var(--muted);
 }
@@ -709,6 +709,14 @@ body.intro-open .sd-ui { visibility: hidden; }
   .intro-head { order: 0; }
   .intro-stage { order: 2; }
   .intro-enter { order: 3; }
+}
+
+/* three to a row on narrower screens */
+@media (max-width: 1099px) {
+  .intro-controls { --columns: 3; }
+  .intro-control:nth-child(n) { border-top: 0; }
+  .intro-control:nth-child(n + 4) { border-top: 1px solid rgba(111, 243, 255, 0.08); }
+  .intro-glyph { width: clamp(70px, min(7.6vw, 11vh), 110px); }
 }
 
 @media (max-width: 860px) {

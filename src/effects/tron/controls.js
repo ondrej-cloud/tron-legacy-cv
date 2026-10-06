@@ -16,13 +16,21 @@
 //   both fists held together  END OF LINE: the Grid powers down light by light and
 //                             hands the screen back to the intro
 //   both palms open, facing   portal between the hands (not while you have a disc out)
+//   three fingers, held       call the Recognizer: it flies over from this hand's side and
+//                             its cone of light derezzes what it passes over
+//   pinch                     grab the light wall next to the pinch and drag it, or snatch
+//                             a thrown disc out of the air (pinch.js)
+//   both hands framing        two Ls at opposite corners of a picture, held: a snapshot
+//                             (detectFrame() in gestures.js, snapshot.js)
 //
 // Real tracking jitters, so every action needs its pose to hold for a moment
 // on top of the tracker's own debounce, and drawing survives short dropouts.
 // A fist has to be held for half a second, so passing through one on the
 // way between two other gestures does nothing.
 import { OneEuroFilter, PointFilter, VelocityWindow, clamp, easeTowards } from './filters.js';
+import { detectFrame } from '../../gestures.js';
 import { WALL } from './walls.js';
+import { createPinch } from './pinch.js';
 import { BATON } from './baton.js';
 import { END_OF_LINE } from './endofline.js';
 
@@ -66,15 +74,23 @@ export const CONTROLS = {
   portalRise: 0.4,        // s
   portalFall: 0.3,
   portalWidth: 0.8,       // portal width relative to the distance between the palms
+  threeHoldMs: 300,       // three fingers held this long call the Recognizer ...
+  recognizerCooldownMs: 8500,  // ... at most this often (one flight takes 6.2 s)
+  frameHoldMs: 600,       // both hands framing a picture this long take a snapshot
+  frameGraceMs: 150,      // the frame survives a detection dropout this long
+  frameCooldownMs: 2500,
+  frameBlockMs: 400,      // no new walls for this long after a frame, the fingers still point
+  frameWallAge: 0.6,      // s: walls younger than this when a frame forms were the way into it
 };
 
 const PALM_POINTS = [0, 5, 9, 13, 17];
 
 // `log(name)` records an action for the stats. `onBatonCycle(cycle,
 // holderId)` hears about a cycle rezzed from a baton; if it returns true,
-// somebody gets on it (ride mode) and it doesn't ride off.
+// somebody gets on it (ride mode) and it doesn't ride off. `onSnapshot(frame)`
+// takes the picture two framing hands asked for (frame: the two corners).
 export function createControls({ hands, view, teams, walls, discs, cycles, batons, digitizer, endOfLine,
-  voxels, flashes, stage, log, onBatonCycle = null }) {
+  voxels, flashes, stage, recognizer, log, onBatonCycle = null, onSnapshot = null }) {
   let states = { left: createHandState('left'), right: createHandState('right') };
   const discHands = { left: discHand(), right: discHand() };
   const waves = [];
@@ -83,7 +99,12 @@ export function createControls({ hands, view, teams, walls, discs, cycles, baton
     readySinceMs: 0, lastReadyMs: -Infinity, opened: 0,
   };
   const tethers = [{ x: 0, y: 0, strength: 0 }, { x: 0, y: 0, strength: 0 }];
-  const counts = { derezz: 0, teamSwitches: 0, batonCycles: 0 };
+  const counts = { derezz: 0, teamSwitches: 0, batonCycles: 0, recognizers: 0, snapshots: 0 };
+  const pinch = createPinch({ view, walls, discs, flashes, teams, log });
+  // two hands framing a picture: the corners (view units) and how far the shot has charged
+  const frame = { corners: null, charge: 0, sinceMs: 0, lastSeenMs: -Infinity, firedMs: -Infinity,
+    firedAt: -Infinity, latched: false };
+  let lastRecognizerMs = -Infinity;
   // the other hand taking a baton: { holder, grabber, side, sinceMs, latched, startDistance, progress }
   let grab = null;
   // two fists together: { near, sinceMs, charge, x, y, radius }
@@ -168,11 +189,14 @@ export function createControls({ hands, view, teams, walls, discs, cycles, baton
   function updateDrawing(state, hand, nowMs, dt) {
     const disc = discs.ownedBy(hand.id);
     const holdsDisc = disc && (disc.state === 'held' || disc.state === 'summoning');
-    const pointing = hand.visible && hand.gesture === 'point' && !holdsDisc;
+    // the index fingers of a frame point too, but they don't draw
+    const framing = nowMs - frame.lastSeenMs < CONTROLS.frameBlockMs;
+    const pointing = hand.visible && hand.gesture === 'point' && !holdsDisc && !framing;
     if (pointing) {
       state.lastPointMs = nowMs;
       if (!state.trail && nowMs - hand.gestureSince >= CONTROLS.pointHoldMs) {
         state.trail = walls.start(state.tip.position, time, teams[hand.id]);
+        state.trailSince = time;
         log(`wall ${initial(hand.id)}`);
       }
     }
@@ -291,6 +315,7 @@ export function createControls({ hands, view, teams, walls, discs, cycles, baton
       states[id].fistLatched = true;
     }
     grab = null;
+    pinch.clear();
     // a derezz wave around the fists, and a ring running out over the whole
     // frame; behind it every light goes out in turn (endofline.js)
     const color = teams.left.color;
@@ -300,6 +325,7 @@ export function createControls({ hands, view, teams, walls, discs, cycles, baton
     walls.powerDown(offTime);
     cycles.powerDown(offTime);
     discs.powerDown(offTime);
+    recognizer.powerDown(offTime);
     flashes.spawn({ x: pair.x, y: pair.y, size: 0.2, duration: 0.7, color, glint: 1.4 });
   }
 
@@ -344,6 +370,29 @@ export function createControls({ hands, view, teams, walls, discs, cycles, baton
     const middle = toView(hand.tips.middle, {});
     const emitter = { x: (index.x + middle.x) / 2, y: Math.max(index.y, middle.y) + 0.03 };
     if (digitizer.start(hand.id, emitter, teams[hand.id].color)) state.lastDigitize = time;
+  }
+
+  // Three fingers held call the Recognizer from this hand's side of the
+  // frame. One flies at a time; its cone does the derezzing (updateScan()).
+  function updateRecognizer(state, hand, nowMs) {
+    if (!heldOnce(state, hand, nowMs, 'three', CONTROLS.threeHoldMs, 0)) return;
+    if (recognizer.busy || nowMs - lastRecognizerMs < CONTROLS.recognizerCooldownMs) return;
+    if (!recognizer.call(hand.id)) return;
+    lastRecognizerMs = nowMs;
+    state.lastRecognizer = time;
+    counts.recognizers++;
+    log(`recognizer ${initial(hand.id)}`);
+    const middle = toView(hand.tips.middle, {});
+    flashes.spawn({ x: middle.x, y: middle.y + 0.02, size: 0.08, duration: 0.5, color: recognizer.color, glint: 1.2 });
+  }
+
+  // A pinch drags a wall or snatches a disc (pinch.js). A disc snatched out
+  // of the air is held like one summoned with an OK: opening the hand lets
+  // it go, a flick throws it.
+  function updatePinch(state, hand, nowMs, dt) {
+    const disc = discs.ownedBy(hand.id);
+    const holdsDisc = Boolean(disc && (disc.state === 'held' || disc.state === 'summoning'));
+    if (pinch.update(hand, nowMs, time, dt, { holdsDisc })) state.okWithDisc = true;
   }
 
   // A shaka holds a baton along the thumb-tip to pinky-tip axis, centred on
@@ -489,6 +538,81 @@ export function createControls({ hands, view, teams, walls, discs, cycles, baton
     });
   }
 
+  // Both hands framing a picture (two Ls at opposite corners, detectFrame()
+  // in gestures.js) and held: a snapshot. While it charges the HUD draws the
+  // frame between the hands, and the walls the pointing fingers began on the
+  // way into the frame are taken back.
+  function updateFrame(nowMs, dt) {
+    const corners = endOfLine.active ? null : framingCorners();
+    if (corners) {
+      frame.lastSeenMs = nowMs;
+      frame.sinceMs ||= nowMs;
+      if (!frame.corners) frame.corners = corners;
+      else {
+        for (const [index, corner] of corners.entries()) {
+          frame.corners[index].x = easeTowards(frame.corners[index].x, corner.x, dt, 0.05);
+          frame.corners[index].y = easeTowards(frame.corners[index].y, corner.y, dt, 0.05);
+        }
+      }
+      for (const id of ['left', 'right']) takeBackWall(states[id]);
+    } else if (nowMs - frame.lastSeenMs > CONTROLS.frameGraceMs) {
+      Object.assign(frame, { corners: null, charge: 0, sinceMs: 0, latched: false });
+      return;
+    }
+    // one picture per frame: the hands have to let go before the next one
+    if (frame.latched) {
+      frame.charge = 0;
+      return;
+    }
+    frame.charge = clamp((nowMs - frame.sinceMs) / CONTROLS.frameHoldMs, 0, 1);
+    if (frame.charge < 1 || nowMs - frame.firedMs < CONTROLS.frameCooldownMs) return;
+    frame.latched = true;
+    frame.charge = 0;
+    frame.firedMs = nowMs;
+    frame.firedAt = time;
+    counts.snapshots++;
+    log('snapshot');
+    onSnapshot?.({ corners: frame.corners.map((corner) => ({ ...corner })) });
+  }
+
+  // the two frame corners in view units, or null
+  function framingCorners() {
+    const left = hands.left;
+    const right = hands.right;
+    if (!left.visible || !right.visible || !left.fingers || !right.fingers) return null;
+    // landmarks in frame-height units on both axes, palm size to match
+    const shape = (hand) => ({
+      points: hand.landmarks.map((point) => ({ x: point.x * view.aspect, y: point.y })),
+      analysis: { ...hand.fingers, palmSize: hand.size },
+    });
+    const found = detectFrame(shape(left), shape(right));
+    return found && found.corners.map((corner) => ({ x: corner.x - view.aspect / 2, y: 0.5 - corner.y }));
+  }
+
+  // a wall just begun on the way into a frame goes; an older one stays
+  function takeBackWall(state) {
+    if (!state.trail) return;
+    if (time - state.trailSince < CONTROLS.frameWallAge) walls.discard(state.trail);
+    else walls.finish(state.trail, time);
+    state.trail = null;
+  }
+
+  // The Recognizer's cone derezzes whatever it passes over.
+  function updateScan() {
+    const beam = recognizer.beam;
+    if (beam.strength < 0.5) return;
+    const inside = (point) => beam.contains(point);
+    const middle = { x: 0, y: 0 };
+    walls.shatterWhere((sample, extrude) => {
+      middle.x = sample.x + extrude.x / 2;
+      middle.y = sample.y + extrude.y / 2;
+      return inside(middle);
+    }, (sample, extrude) => spawnWallVoxels(sample, extrude, beam.apex), time);
+    cycles.shatterWhere(inside, Infinity, beam.apex, { spareMounted: true });
+    discs.shatterWhere(inside);
+    batons.derezzWhere(inside);
+  }
+
   function spawnWallVoxels(sample, extrude, wave) {
     // every other sample, three cubes up the wall: the wall breaks into a voxel grid
     if (Math.round(sample.along / WALL.spacing) % 2) return;
@@ -532,6 +656,8 @@ export function createControls({ hands, view, teams, walls, discs, cycles, baton
     if (endOfLine.active) return 'END OF LINE';
     if (pair.charge > 0) return 'END OF LINE';
     if (state.fistCharge > 0) return 'DEREZZ';
+    if (frame.charge > 0) return 'FRAME';
+    if (pinch.holding(hand.id)) return 'GRAB';
     if (grab && grab.grabber === hand.id) return grab.latched ? 'PULL APART' : 'GRAB';
     if (grab?.latched && grab.holder === hand.id) return 'PULL APART';
     const disc = discs.ownedBy(hand.id);
@@ -541,6 +667,8 @@ export function createControls({ hands, view, teams, walls, discs, cycles, baton
       [state.lastTeamSwitch, `PROGRAM ${teams[hand.id].name}`],
       [state.lastDerezz, 'DEREZZ'],
       [state.lastLaunch, 'LIGHT CYCLE'],
+      [state.lastRecognizer, 'RECOGNIZER'],
+      [frame.firedAt, 'SNAPSHOT'],
     ].filter(([at]) => time - at < 1.2).sort((a, b) => b[0] - a[0])[0];
     if (latest) return latest[1];
     if (portal.on) return 'PORTAL OPEN';
@@ -559,6 +687,8 @@ export function createControls({ hands, view, teams, walls, discs, cycles, baton
     for (const id of ['left', 'right']) Object.assign(discHands[id], discHand());
     waves.length = 0;
     grab = null;
+    pinch.clear();
+    Object.assign(frame, { corners: null, charge: 0, sinceMs: 0, lastSeenMs: -Infinity, latched: false });
     Object.assign(pair, { near: false, sinceMs: 0, charge: 0 });
     Object.assign(portal, { on: false, strength: 0, age: 0, readySinceMs: 0, lastReadyMs: -Infinity });
     for (const tether of tethers) tether.strength = 0;
@@ -583,6 +713,8 @@ export function createControls({ hands, view, teams, walls, discs, cycles, baton
     tethers,
     counts,
     pair,
+    frame,
+    pinchCounts: pinch.counts,
     get grab() {
       return grab;
     },
@@ -606,21 +738,27 @@ export function createControls({ hands, view, teams, walls, discs, cycles, baton
           state.action = '';
         }
         grab = null;
+        pinch.clear();
+        frame.charge = 0;
         return;
       }
       // while the Grid is down, nothing new can be made
       if (!endOfLine.active) {
+        updateFrame(nowMs, dt);
         for (const hand of [hands.left, hands.right]) {
           const state = states[hand.id];
           updateDrawing(state, hand, nowMs, dt);
           updateDisc(state, hand, nowMs);
+          updatePinch(state, hand, nowMs, dt);
           updateFist(state, hand, nowMs);
           updateRock(state, hand, nowMs);
           updateThumbsUp(state, hand, nowMs);
           updatePeace(state, hand, nowMs);
+          updateRecognizer(state, hand, nowMs);
           updateBaton(state, hand, nowMs);
         }
         updateGrab(nowMs);
+        updateScan();
       } else {
         for (const id of ['left', 'right']) {
           states[id].fistCharge = 0;
@@ -666,6 +804,8 @@ function createHandState(id) {
     lastTeamSwitch: -Infinity,
     lastLaunch: -Infinity,
     lastDigitize: -Infinity,
+    lastRecognizer: -Infinity,
+    trailSince: -Infinity,
     lastShakaMs: -Infinity,
     batonSpent: false,
     action: '',
