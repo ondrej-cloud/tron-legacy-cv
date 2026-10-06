@@ -1,7 +1,9 @@
 # Tron Legacy CV: the Grid in your webcam, controlled with your hands
 
+[![Tests](https://github.com/ondrej-cloud/tron-legacy-cv/actions/workflows/test.yml/badge.svg)](https://github.com/ondrej-cloud/tron-legacy-cv/actions/workflows/test.yml)
+
 <p align="center">
-  <img src="media/portal.jpg" alt="Both open palms facing the camera open a beam of light between the hands, with the Grid lighting up below" width="820">
+  <img src="media/demo.gif" alt="The scripted demo: a portal between two open palms, light walls drawn with the index fingers, identity discs and a derezz" width="820">
 </p>
 
 I'm a big fan of TRON: Legacy and wanted to build a computer vision project, so I made this. Tron Legacy CV
@@ -15,8 +17,8 @@ recognizer built on top of those landmarks. It all runs in your browser and noth
 
 **▶ Live demo:** https://tron-legacy-cv.vercel.app (allow the camera, or watch the scripted demo without one)
 
-- **Nine gestures, two hands**: point, rock, OK (and a flick to throw), thumbs up, a held fist, two fists
-  together, peace, shaka and both open palms. Each hand plays independently and has its own team colour,
+- **Twelve gestures, two hands**: point, rock, OK (and a flick to throw), pinch, thumbs up, a held fist, two
+  fists together, peace, three fingers, shaka, both open palms and a two-handed photo frame. Each hand plays independently and has its own team colour,
   TRON cyan or CLU orange.
 - **A light cycle duel you steer with your hands**: hold them up like handlebars, tilt to turn, push towards
   the camera to speed up, in an arena with ramps and jumps.
@@ -44,12 +46,15 @@ recognizer built on top of those landmarks. It all runs in your browser and noth
 | 🤘 **Rock** (index + pinky) | Switches that hand's colour between TRON cyan and CLU orange |
 | 👌 **OK** | Summons an identity disc into that hand |
 | **Flick** while holding a disc | Throws it. It ricochets off the screen edges, your walls, batons and the other disc, then comes back |
+| 🤏 **Pinch** (thumb and index touching, the other fingers folded) | Picks up the light wall next to your fingers and drags the whole wall along until you let go. Pinch next to a thrown disc and you snatch it out of the air, even one the other hand threw |
 | 👍 **Thumbs up** | Rezzes a 3D light cycle (wireframe first, then solid) that drops onto the Grid and rides off, leaving its jetwall behind |
 | ✊ **Hold a fist** | A ring charges for half a second, then everything around that hand derezzes into voxels |
 | ✊✊ **Two fists together** | END OF LINE: the Grid powers down light by light, the words are typed in the dark, and you're back at the start screen |
+| **Three fingers** (index, middle and ring), held | Calls a Recognizer: it flies in from the side of that hand, slows down above you and sweeps a cone of light over the Grid. Walls, discs, batons and light cycles inside the cone derezz |
 | ✌️ **Peace** | The digitizing laser sweeps over you and turns your outline into light |
 | 🤙 **Shaka** (thumb + pinky) | A light baton in your hand: swing it to cut walls and bat discs away. Grab its other end with your other hand and pull apart: it splits into two handles, a light cycle rezzes and you ride it into the arena (see below) |
 | 🖐️🖐️ **Both palms open**, facing the camera | Opens a portal of light between your hands and lights up the Grid |
+| **Frame it**: thumb and index of each hand in an L, the two Ls at opposite corners, held | A viewfinder charges between your hands, the shutter flashes and you get a TRON photo: the camera picture with the light on it and a small TRON LEGACY CV mark, saved as a PNG |
 
 <table>
   <tr>
@@ -74,7 +79,14 @@ recognizer built on top of those landmarks. It all runs in your browser and noth
   </tr>
   <tr>
     <td><img src="media/baton-cycle.jpg" alt="A light cycle with glowing cyan wheels rezzed between the hands"><br>…and a light cycle rezzes between your hands</td>
-    <td><img src="media/intro.jpg" alt="The intro screen with the nine controls listed next to animated hand glyphs"><br>The intro, with the controls</td>
+    <td><img src="media/intro.jpg" alt="The intro screen with the twelve controls listed next to animated hand glyphs"><br>The intro, with the controls</td>
+  </tr>
+</table>
+<table>
+  <tr>
+    <td width="33%"><img src="media/grab.jpg" alt="A cyan light wall glowing white-hot as a pinching hand drags it, while the other hand holds an orange disc it caught"><br><b>Pinch:</b> dragging a whole wall; the other hand snatched a disc out of the air</td>
+    <td width="33%"><img src="media/recognizer.jpg" alt="An orange Recognizer flying over the Grid, its cone of light breaking a wall into voxels"><br><b>Three fingers:</b> the Recognizer's cone derezzes a wall</td>
+    <td width="33%"><img src="media/snapshot.jpg" alt="The saved TRON photo: the Recognizer over a person in a room, with the TRON LEGACY CV mark in the corner"><br><b>Frame it:</b> the photo it saves (on a synthetic test video)</td>
   </tr>
 </table>
 
@@ -89,7 +101,10 @@ leave jetwalls; whoever hits a wall or the arena boundary derezzes, and the othe
 - **CLU** switches between hunting you, boxing you in and breaking away into open floor, and uses the ramps.
 - **A radar** in the corner and an arrow at the screen edge always show where CLU is, even behind you.
 - **After the match** a slow-motion kill cam replays the final crash, then both open palms give you a rematch
-  and two fists end the line.
+  and two fists end the line. Hold up one, two or three fingers to pick the next match's difficulty; your
+  wins, fastest win and top speed are kept as personal bests.
+- **Your first ride** starts with a short handlebar tutorial: the countdown waits until your grip is steady,
+  and that moment also sets your neutral throttle distance.
 
 You steer with both hands held up like **handlebars** (`src/handlebars.js`):
 
@@ -194,11 +209,14 @@ URL options: `?skipintro`, `?demo`, `?tune`, `?clean` (start with the UI hidden)
 npm install
 npm test                 # gesture recognition checks against procedural hands
 npm run shot -- ./ --query "demo=1&skipintro"   # headless screenshots with a fake webcam
+node tools/record.mjs --from 1500 --to 13000 --out media/demo.gif   # record the demo to a GIF
 ```
 
 `npm test` runs every pose of the procedural hand through the recognizer for both hands, palm in and out and
-tilted (727 checks), and checks the handlebar reading: grip, steering and throttle (14 checks). The screenshot tool drives headless Chrome on the real GPU with a fake webcam; all the
-pictures in this README come from it.
+tilted, plus the two-handed photo frame (967 checks), and checks the handlebar reading: grip, steering,
+throttle and the steady-grip check (21 checks). The same tests run on GitHub Actions for every push. The
+screenshot tool drives headless Chrome on the real GPU with a fake webcam; all the pictures in this README,
+and the GIF above, come from it.
 
 ## Project structure
 
@@ -220,7 +238,9 @@ src/
   effects/tron/ride/    the light cycle duel: terrain, arena, chase camera, CLU's AI, radar, kill cam
 tools/
   test-gestures.mjs     recognition tests
+  test-handlebars.mjs   handlebar tests
   shot.mjs              headless screenshots
+  record.mjs            records the demo to a GIF or MP4
 audio/                  the soundtrack
 models/                 3D models (glTF) and models.json, the list the app loads from
 media/                  README images
