@@ -7,11 +7,14 @@
 //             camera takes over exactly where the AR one was, then pushes
 //             forwards and down into the seat while the room fades into the
 //             arena and the webcam shrinks into a corner
+//   ready     the first time with the camera: the grip tutorial, until both
+//             hands hold the handlebars steadily (tutorial.js)
 //   duel      rounds of 3-2-1, race, derezz (duel.js), each derezz replayed
 //             in slow motion (killcam.js), until one side has won; then the
 //             TRON WINS / CLU WINS screen, which waits for the player: both
 //             palms open (or R) for a rematch, both fists together (or
-//             Escape) for END OF LINE (result.js)
+//             Escape) for END OF LINE, 1, 2 or 3 fingers (or keys) for the
+//             next match's difficulty (result.js); personal bests (bests.js)
 //   exit      the arena derezzes and the camera image grows back: the AR
 //             Grid boots again (demo mode, or nobody left in view)
 //
@@ -30,7 +33,7 @@
 // numbers), replay.js and killcam.js (crash replays), result.js, scene.js
 // (bikes, jetwalls, voxels), camera.js, finish.js (speed lines, flashes,
 // the replay's look, the exit's derezz), hud.js, mirror.js, pip.js (the
-// webcam in a corner) and sound.js.
+// webcam in a corner), tutorial.js, bests.js and sound.js.
 import * as THREE from 'three';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
@@ -50,11 +53,13 @@ import { createKillcam } from './killcam.js';
 import { createResult } from './result.js';
 import { createMirror, mirrorRect } from './mirror.js';
 import { seededRandom } from './brain.js';
-import { ARENA, BIKE, MATCH } from './rules.js';
+import { createTutorial } from './tutorial.js';
+import { createBests } from './bests.js';
+import { ARENA, BIKE, LEVELS, MATCH } from './rules.js';
 import { features } from './terrain.js';
 
 const PIP = { width: 0.19, minWidth: 220, maxWidth: 340, margin: 24 };
-const DEMO_SEED = 145;
+const DEMO_SEED = 1155;
 const DEMO_STEP = 1 / 60;
 // ?autopilot (or ?autopilot=<seed>): the demo's autopilot rides your cycle;
 // ?rounds=<n>: first to n rounds wins (both for trying things out)
@@ -83,9 +88,12 @@ const POWER_DOWN = { bikes: [0.3, 0.9], hud: 0.45, hudCollapse: 0.3, handOver: E
 const RADAR_RANGE = { min: 70, max: 230, margin: 1.3, ease: 0.6 };
 const CLOSE = 35;                // m: CLU this near pulses on the radar and the screen's edge
 const LOOK_BACK = 0.35;          // s of braking before the rear-view mirror comes up
+const WARM_AFTER = 2.5;          // s after the start before the warm-up: the page's own start-up keeps the GPU busy
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 const smooth = (t) => t * t * (3 - 2 * t);
+// s as m:ss
+const clock = (seconds) => `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`;
 
 // log(name) records what happened for the stats.
 export function createRide({ renderer, container, hands, host, teams, endOfLine, view, envMap, onExit, log = () => {} }) {
@@ -102,10 +110,12 @@ export function createRide({ renderer, container, hands, host, teams, endOfLine,
 
   const hud = createRideHud(container);
   const pip = createPip(hands.video);
-  const sound = createRideSound(host?.music);
+  const sound = createRideSound(host?.sfx);
   const handlebars = createHandlebars();
   const killcam = createKillcam({ rideScene, rideCamera, sound });
   const result = createResult(hands);
+  const tutorial = createTutorial();
+  const bests = createBests();
   const mirror = createMirror(renderer);
   const keys = { left: false, right: false, up: false, down: false, back: false, lastMs: -Infinity };
   const demoMode = () => hands.mode === 'demo';
@@ -131,6 +141,9 @@ export function createRide({ renderer, container, hands, host, teams, endOfLine,
   let rematch = false;         // the next round 1 is a rematch (the bikes rezz as between rounds)
   let replay = null;           // the kill-cam's view while a crash is replayed (killcam.js)
   let choice = null;           // what the player chose on the result screen
+  let level = bests.level;     // the difficulty the next match is ridden at (LEVELS)
+  let matchLevel = level;      // ... and this one
+  let beaten = null;           // the personal bests this match beat: { fastest, topSpeed }
   let warned = false;          // the proximity ping has sounded (until CLU is further off again)
   let replayLook = 0;          // how much the frame looks like a replay (finish.js)
   let showcaseCut = false;     // the result has just come up: cut to the winner
@@ -157,6 +170,8 @@ export function createRide({ renderer, container, hands, host, teams, endOfLine,
       result.key('rematch');
     } else if (event.key === 'Escape' && atResult) {
       result.key('exit');
+    } else if (['1', '2', '3'].includes(event.key) && atResult) {
+      result.pickLevel(Number(event.key) - 1);
     } else if (event.key.toLowerCase() === 'b' && state === 'duel') {
       keys.back = true;
     }
@@ -169,21 +184,82 @@ export function createRide({ renderer, container, hands, host, teams, endOfLine,
     keys.lastMs = performance.now();
   });
 
-  // Shaders and render targets are made on first use, which stalls the
-  // frame: compile the arena in the background once it's loaded, then
-  // render one frame of it unseen (the AR frame is drawn over it).
-  let warm = 'loading';
+  // Shaders, render targets and the GPU's pipelines are made on first use,
+  // which stalls the frame. So while the AR Grid is still on screen, what
+  // the ride draws is made ahead, unseen, a step per frame (warmup(); the
+  // AR frame is drawn over whatever a step renders): the arena's shaders
+  // compile in the background once it has loaded; then two cycles are set
+  // out mid-rezz with a voxel, and theirs (and the finish pass's) compile
+  // in the background too; then the composer's buffers are allocated; the
+  // scene is drawn into them; the whole frame goes through the passes; and
+  // last the rear-view mirror.
+  let warm = 'loading';        // then 'warming' (a step at a time), then 'done'
+  let warmStep = 0;
+  let warmBusy = false;        // a step is waiting for the compiler
+  let staged = null;           // the warm-up's duel
+  let pendingStart = null;     // a ride asked for before the warm-up was done: its team
+  // the finish pass's shader on a quad in the scene, to be compiled with it
+  const finishQuad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), finish.pass.material);
+  finishQuad.frustumCulled = false;
+  let warmSteps = [];
+  // the steps, once everything is in the scene
+  const makeWarmSteps = () => [
+    () => {
+      staged = createDuel({ random: seededRandom(1) });
+      staged.start();
+      rideCamera.setAspect(view.aspect);
+      rideCamera.snapBehind(staged.player);
+      // mid-rezz, so the hologram's shaders are made too, and a voxel
+      rideScene.voxels.spawn(new THREE.Vector3(0, 1, 0), new THREE.Vector3(), colors[0], { life: 0.05 });
+      rideScene.update({ riders: staged.riders, rezz: [0.8, 0.8], fades: [null, null], colors, power: 1,
+        riderPower: [1, 1], seconds, dt: 1 / 60 });
+      rideScene.scene.add(finishQuad);
+      return compileUnseen().finally(() => rideScene.scene.remove(finishQuad));
+    },
+    () => {
+      for (const target of [composer.renderTarget1, composer.renderTarget2, bloom.renderTargetBright,
+        ...bloom.renderTargetsHorizontal, ...bloom.renderTargetsVertical]) renderer.initRenderTarget(target);
+    },
+    // the scene, a part of it per frame
+    () => drawUnseen([]),
+    ...rideScene.scene.children.map((part) => () => drawUnseen([part])),
+    () => drawUnseen(),
+    () => {
+      finish.set({ time: seconds, speed: 0.5, flash: 0, dissolve: 0, power: 1 });
+      composer.render();
+    },
+    () => {
+      mirror.render(rideScene.scene, staged.player, mirrorRect(view.width), view.height, 1);
+      staged = null;
+      rideScene.voxels.clear();
+    },
+  ];
+  // draws the scene into the composer's buffer: all of it, or only `parts` of it
+  function drawUnseen(parts = null) {
+    const hidden = parts ? rideScene.scene.children.filter((child) => !parts.includes(child) && child.visible) : [];
+    for (const child of hidden) child.visible = false;
+    const previous = renderer.getRenderTarget();
+    renderer.setRenderTarget(composer.renderTarget1);
+    renderer.render(rideScene.scene, camera);
+    renderer.setRenderTarget(previous);
+    for (const child of hidden) child.visible = true;
+  }
+  function compileUnseen() {
+    // into a half-float target, as the composer renders: the same shader variants
+    const target = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType });
+    const previous = renderer.getRenderTarget();
+    renderer.setRenderTarget(target);
+    const compiled = renderer.compileAsync(rideScene.scene, camera);
+    renderer.setRenderTarget(previous);
+    return compiled.finally(() => target.dispose());
+  }
   Promise.all([rideScene.ready, rideScene.arena.stadiumReady])
+    .then(compileUnseen)
     .then(() => {
-      const target = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType });
-      const previous = renderer.getRenderTarget();
-      renderer.setRenderTarget(target);
-      const compiled = renderer.compileAsync(rideScene.scene, camera);
-      renderer.setRenderTarget(previous);
-      return compiled.finally(() => target.dispose());
-    })
-    .then(() => {
-      warm = 'compiled';
+      // (unless a ride has already begun, and warmed up as it went)
+      if (warm !== 'loading') return;
+      warmSteps = makeWarmSteps();
+      warm = 'warming';
     });
 
   function setState(name) {
@@ -232,14 +308,37 @@ export function createRide({ renderer, container, hands, host, teams, endOfLine,
       // the demo plays the same match every time (one its rider wins)
       random: seededRandom(demoMode() ? DEMO_SEED : Number.isFinite(seed) ? seed : (Math.random() * 1e9) >>> 0),
       winScore: demoMode() ? MATCH.demoWinScore : ROUNDS > 0 ? ROUNDS : MATCH.winScore,
-      difficulty: demoMode() ? MATCH.demoDifficulty : MATCH.difficulty,
+      difficulty: demoMode() ? MATCH.demoDifficulty : LEVELS[level].difficulty,
       playerTeam,
     });
+    matchLevel = level;
+    beaten = null;
     killcam.stop();
     replay = null;
     choice = null;
     rematch = false;
     duel.start();
+    // Not warmed up yet (a ride straight after loading): what the ride will
+    // only show later (the cycles mid-rezz, the voxels of a crash or a hard
+    // landing, the finish pass) compiles in the background while the camera
+    // swoops in. The next frame's update puts the scene back as it should be.
+    if (warm !== 'done') {
+      warm = 'done';
+      staged = null;
+      rideScene.voxels.clear();
+      // a voxel out of sight under the floor, gone in a moment
+      rideScene.voxels.spawn(new THREE.Vector3(0, -50, 0), new THREE.Vector3(0, -60, 0), colors[0], { life: 0.05 });
+      rideScene.update({ riders: duel.riders, rezz: [0.8, 0.8], fades: [null, null], colors, power: 1,
+        riderPower: [1, 1], seconds, dt: 0 });
+      rideScene.scene.add(finishQuad);
+      compileUnseen().finally(() => rideScene.scene.remove(finishQuad));
+      mirror.compile();
+    }
+    // the first ride with the camera waits for a steady grip before the countdown
+    if (hands.mode === 'camera' && !autopiloted() && tutorial.wanted) {
+      duel.hold();
+      tutorial.start();
+    }
     // the player's bike goes on rezzing from where the AR one had got to
     rezzStart[0] = seconds - (mountView?.age ?? 0);
     rezzStart[1] = Infinity;           // CLU's rezzes with the countdown
@@ -293,6 +392,25 @@ export function createRide({ renderer, container, hands, host, teams, endOfLine,
     if (input.idle) input.steer = 0;
   }
 
+  // Before the first countdown with the camera: the grip tutorial, until
+  // both hands hold the handlebars steadily. The arrow keys (or leaving
+  // camera mode) skip it.
+  function readyUp(dt) {
+    if (keys.left || keys.right || keys.up || keys.down || hands.mode !== 'camera') {
+      tutorial.skip();
+      duel.go();
+      return;
+    }
+    const step = tutorial.update(hands, dt, view.aspect);
+    // the moment the grip settles is where the throttle's neutral is
+    if (step === 'locked') {
+      handlebars.recalibrate();
+      sound.tick(3);
+    } else if (step === 'go') {
+      duel.go();
+    }
+  }
+
   // what happened in the duel this frame: sounds, voxels, the camera
   function handleEvents() {
     for (const event of duel.events.splice(0)) {
@@ -343,8 +461,13 @@ export function createRide({ renderer, container, hands, host, teams, endOfLine,
         sound.win(event.winner === 'player');
         killcam.stop();
         replay = null;
-        result.start();
+        result.start(matchLevel);
         showcaseCut = true;
+        // the autopilot's matches aren't the player's
+        if (!autopiloted()) {
+          beaten = bests.record({ level: matchLevel, won: event.winner === 'player', time: duel.stats.time,
+            topSpeed: duel.stats.topSpeed });
+        }
       } else if (event.type === 'mode') {
         log(`ride clu ${event.mode}`);
       } else if (event.type === 'jump' && event.rider === duel.player) {
@@ -382,11 +505,19 @@ export function createRide({ renderer, container, hands, host, teams, endOfLine,
     choice = result.update(dt, { demo: demoMode(), aspect: view.aspect });
     if (!choice) return;
     log(`ride choice ${choice}`);
+    // the difficulty chosen counts for the next match, now or later
+    if (!demoMode() && result.level !== level) {
+      level = result.level;
+      bests.level = level;
+      log(`ride level ${LEVELS[level].name.toLowerCase()}`);
+    }
     if (choice === 'rematch') {
       choice = null;
       rematch = true;
       handlebars.recalibrate();
-      duel.rematch();
+      duel.rematch(demoMode() ? MATCH.demoDifficulty : LEVELS[level].difficulty);
+      matchLevel = level;
+      beaten = null;
       sound.rematch();
     } else if (choice === 'exit') {
       endOfLine.start({ x: 0, y: 0 });
@@ -469,9 +600,8 @@ export function createRide({ renderer, container, hands, host, teams, endOfLine,
   function resultInfo() {
     const won = duel.winner === 'player';
     const stats = duel.stats;
-    const minutes = Math.floor(stats.time / 60);
-    const seconds = Math.floor(stats.time % 60);
     const charge = result.info;
+    const fastest = bests.all.levels[matchLevel].fastest;
     return {
       time: charge.time,
       title: `${won ? TEAM_NAMES[playerTeam] : TEAM_NAMES[1 - playerTeam]} WINS`,
@@ -482,7 +612,7 @@ export function createRide({ renderer, container, hands, host, teams, endOfLine,
       score: [duel.score[0], duel.score[1]],
       names: [TEAM_NAMES[playerTeam], TEAM_NAMES[1 - playerTeam]],
       stats: [
-        ['TIME', `${minutes}:${String(seconds).padStart(2, '0')}`],
+        ['TIME', clock(stats.time)],
         ['TOP SPEED', `${Math.round(stats.topSpeed * 3.6)} KM/H`],
         ['JUMPS', String(stats.jumps)],
         ['CLOSEST CALL', Number.isFinite(stats.closest) ? `${stats.closest.toFixed(1)} M` : '-'],
@@ -490,6 +620,18 @@ export function createRide({ renderer, container, hands, host, teams, endOfLine,
       rematch: charge.rematch,
       endOfLine: Math.max(charge.endOfLine, endOfLine.active ? 1 : 0),
       demo: demoMode() ? Math.max(0, MATCH.demoResultHold - charge.time) : null,
+      // the next match's difficulty, and the player's own bests (not the autopilot's)
+      levels: demoMode() ? null : {
+        names: LEVELS.map((entry) => entry.name),
+        records: bests.all.levels.map((entry) => `${entry.wins} W  ${entry.losses} L`),
+        current: charge.level,
+        changed: charge.levelChanged,
+        pending: charge.pending,
+      },
+      bests: autopiloted() ? null : [
+        { label: `FASTEST WIN  ·  ${LEVELS[matchLevel].name}`, value: fastest ? clock(fastest) : '-', fresh: Boolean(beaten?.fastest) },
+        { label: 'TOP SPEED EVER', value: `${Math.round(bests.all.topSpeed * 3.6)} KM/H`, fresh: Boolean(beaten?.topSpeed) },
+      ],
     };
   }
 
@@ -524,7 +666,7 @@ export function createRide({ renderer, container, hands, host, teams, endOfLine,
           return { name: TEAM_NAMES[team], rgb: rgb[mine ? 0 : 1], score: duel.score[mine ? 0 : 1], you: mine };
         }),
       },
-      gauges: phase === 'result' || phase === 'over' ? null : {
+      gauges: phase === 'result' || phase === 'over' || phase === 'ready' ? null : {
         speed: player.alive ? player.speed : 0,
         speedFraction: (player.alive ? player.speed : 0) / (BIKE.boost * 1.25),
         boosting: phase === 'race' && input.throttle > 0.7 && !input.brake,
@@ -539,6 +681,12 @@ export function createRide({ renderer, container, hands, host, teams, endOfLine,
       hint: (phase === 'countdown' || phase === 'race') && noGrip > 0.5 && !usingKeys
         ? { reason: reading.hint, accent } : null,
       banner: banner(),
+      tutorial: phase === 'ready' && tutorial.active ? {
+        ...tutorial.info,
+        // the hands can't be seen before the tracker is up
+        hint: hands.status === 'ready' ? tutorial.info.hint : 'STARTING THE HAND TRACKER',
+        accent,
+      } : null,
       replay: replay ? { progress: replay.progress, final: replay.final, speed: replay.speed } : null,
       mirror: state === 'duel' && lookBack > 0.01 ? { rect: mirrorRect(view.width), alpha: lookBack, accent } : null,
       result: phase === 'result' || phase === 'over' || state === 'exit' ? resultInfo() : null,
@@ -602,33 +750,35 @@ export function createRide({ renderer, container, hands, host, teams, endOfLine,
     // cycle away once the arena has taken over.
     mount(cycle, team, { view = null, dismount = null } = {}) {
       if (state !== 'off' || endOfLine.active) return false;
+      pendingStart = null;
       setTeams(team);
       mounted = { cycle, view, dismount, since: seconds };
       setState('mount');
       return true;
     },
-    // the unseen warm-up frame; call before drawing the AR frame
+    // the next step of the warm-up (see warmSteps); call before drawing the AR frame
     warmup() {
-      if (warm !== 'compiled' || state !== 'off') return;
-      warm = 'done';
-      duel = createDuel({ random: seededRandom(1) });
-      duel.start();
-      rideCamera.setAspect(view.aspect);
-      rideCamera.snapBehind(duel.player);
-      // mid-rezz, so the hologram's shaders are made too, and a voxel
-      rezzStart[0] = rezzStart[1] = seconds - 0.8;
-      rideScene.voxels.spawn(new THREE.Vector3(0, 1, 0), new THREE.Vector3(), colors[0], { life: 0.05 });
-      updateScene(1 / 60, 1, [1, 1]);
-      finish.set({ time: seconds, speed: 0.5, flash: 0, dissolve: 0, power: 1 });
-      composer.render();
-      // and the rear-view mirror's own pass
-      mirror.render(rideScene.scene, duel.player, mirrorRect(view.width), view.height, 1);
-      duel = null;
-      rideScene.voxels.clear();
+      if (state === 'off' && warm === 'done' && pendingStart !== null) this.startNow(pendingStart);
+      // (a ride waiting for it doesn't wait for the page to settle)
+      if (state !== 'off' || warm !== 'warming' || warmBusy || (seconds < WARM_AFTER && pendingStart === null)) return;
+      const pending = warmSteps[warmStep++]();
+      if (warmStep >= warmSteps.length) warm = 'done';
+      if (pending) {
+        warmBusy = true;
+        pending.finally(() => {
+          warmBusy = false;
+        });
+      }
     },
     // straight in, without a baton (R, ?ride)
     startNow(team = 0) {
       if (state !== 'off' || endOfLine.active) return false;
+      // straight after loading: the warm-up first, at full speed (warmup())
+      if (warm === 'loading' || warm === 'warming') {
+        pendingStart = team;
+        return true;
+      }
+      pendingStart = null;
       setTeams(team);
       mounted = null;
       beginSwoop(null);
@@ -637,6 +787,7 @@ export function createRide({ renderer, container, hands, host, teams, endOfLine,
     // back to nothing, at once (a fresh Grid)
     reset() {
       state = 'off';
+      pendingStart = null;
       duel = null;
       mounted = null;
       killcam.stop();
@@ -700,6 +851,7 @@ export function createRide({ renderer, container, hands, host, teams, endOfLine,
         } else {
           readInput(dt);
           duel.update(dt, input);
+          if (duel.phase === 'ready') readyUp(dt);
         }
         handleEvents();
         replay = duel.phase === 'crash' ? killcam.update(duel.phaseTime, dt, colors) : null;
@@ -795,9 +947,11 @@ export function createRide({ renderer, container, hands, host, teams, endOfLine,
         ridePhase: duel?.phase ?? null,
         rideScore: duel ? duel.score.join(':') : null,
         rideRound: duel?.round ?? 0,
-        rideWarm: warm,
+        rideWarm: warm === 'warming' ? `warming ${warmStep}/${warmSteps.length}` : warm,
         rideCounts: { ...counts },
         rideClu: duel ? `${duel.cluMode} ${JSON.stringify(duel.brains.clu.counts)}` : null,
+        rideLevel: LEVELS[matchLevel].name,
+        rideTutorial: tutorial.active ? `${tutorial.info.hint || 'steady'} ${tutorial.info.progress.toFixed(2)} t ${tutorial.info.time.toFixed(1)}` : null,
         rideSpin: duel ? duel.stats.spin.map((angle) => Math.round(angle * 180 / Math.PI)).join('/') : null,
         rideStats: duel ? `t ${duel.stats.time.toFixed(1)} top ${Math.round(duel.stats.topSpeed * 3.6)} jumps ${duel.stats.jumps} closest ${duel.stats.closest.toFixed(2)}` : null,
         rideGrip: state === 'off' ? null

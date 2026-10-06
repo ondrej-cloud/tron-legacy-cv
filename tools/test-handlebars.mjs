@@ -3,7 +3,7 @@
 // to the camera.
 //   node tools/test-handlebars.mjs
 import { POSES, poseToLandmarks, analyzeHand } from '../src/gestures.js';
-import { createHandlebars, measureHandlebars, HANDLEBARS } from '../src/handlebars.js';
+import { createGripCheck, createHandlebars, measureHandlebars, GRIP_CHECK, HANDLEBARS } from '../src/handlebars.js';
 
 const ASPECT = 16 / 9;
 let failures = 0;
@@ -82,6 +82,33 @@ check(!measureHandlebars(hand('left', 0.3, 0.5), { visible: false }, ASPECT).val
   check(handlebars.state.gripping, 'a short dropout keeps the grip');
   settle(handlebars, gone, 1);
   check(!handlebars.state.gripping && Math.abs(handlebars.state.steer) < 0.1, 'a long dropout lets go and straightens');
+}
+
+// waiting for a steady grip before a ride
+{
+  const run = (check, frames, seconds) => {
+    for (let t = 0; t < seconds; t += 1 / 60) check.update(typeof frames === 'function' ? frames(t) : frames, 1 / 60, ASPECT);
+    return check.state;
+  };
+  const steady = run(createGripCheck(), pair(0), GRIP_CHECK.hold + 0.1);
+  check(steady.steady && steady.progress === 1 && steady.hint === '', 'a level grip held still is steady');
+  const early = run(createGripCheck(), pair(0), GRIP_CHECK.hold * 0.5);
+  check(!early.steady && early.progress > 0.3 && early.progress < 0.7, `it takes the whole hold (progress ${early.progress.toFixed(2)})`);
+  const open = run(createGripCheck(), pair(0, { pose: POSES.open }), 1);
+  check(!open.steady && open.hint === 'close your hands', `open hands are not a grip (${open.hint})`);
+  const tilted = run(createGripCheck(), pair(0.35), 1);
+  check(!tilted.steady && tilted.hint === 'level your hands', `a tilted grip is steering, not holding still (${tilted.hint})`);
+  // pushing towards the camera and back, about once a second
+  const pumping = run(createGripCheck(), (t) => pair(0, { size: 0.13 * (1 + 0.3 * Math.sin(t * 6)) }), 1.5);
+  check(!pumping.steady && pumping.progress < 1, `hands moving towards the camera are not still (${pumping.hint})`);
+  // a one-frame dropout halfway is bridged; a long one starts over
+  const gone = { left: { visible: false }, right: { visible: false } };
+  const blink = run(createGripCheck(), (t) => (Math.abs(t - 0.4) < 0.01 ? gone : pair(0)), GRIP_CHECK.hold + 0.1);
+  check(blink.steady, 'a tracker blink does not start the hold over');
+  const away = createGripCheck();
+  run(away, pair(0), GRIP_CHECK.hold * 0.8);
+  run(away, gone, 1);
+  check(away.state.progress === 0 && away.state.hint === 'need both hands', 'letting go starts the hold over');
 }
 
 console.log(`${checks - failures}/${checks} handlebar checks passed`);

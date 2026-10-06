@@ -6,7 +6,9 @@
 // plays out the same at any frame rate.
 //
 // After the deciding derezz the duel stays on its result until the caller
-// asks for a rematch() or is done with it (finish()).
+// asks for a rematch() (at a new difficulty, if it likes) or is done with
+// it (finish()). Before the first countdown it can also hold() the riders
+// at their starts (phase 'ready', the grip tutorial) until go().
 //
 // No graphics here: the caller reads the riders and the phase, and takes
 // what happened from `events` each frame ({ type: 'tick' | 'go' | 'crash' |
@@ -33,7 +35,7 @@ export function createDuel({ random, winScore = MATCH.winScore, playerTeam = 0, 
   const clu = createRider(1 - playerTeam);
   const riders = [player, clu];
   // each brain has its own stream, so when one thinks doesn't change the other
-  const cluBrain = createBrain(cluPersona(difficulty), seededRandom(random() * 2 ** 32));
+  let cluBrain = createBrain(cluPersona(difficulty), seededRandom(random() * 2 ** 32));
   const autopilot = createBrain(PERSONAS.autopilot, seededRandom(random() * 2 ** 32));
   const recorder = createRecorder();
   const stats = createStats();
@@ -236,6 +238,10 @@ export function createDuel({ random, winScore = MATCH.winScore, playerTeam = 0, 
     get cluMode() {
       return cluBrain.mode;
     },
+    // CLU's sharpness, 0..1 (cluPersona)
+    get difficulty() {
+      return difficulty;
+    },
     get brains() {
       return { clu: cluBrain, autopilot };
     },
@@ -248,9 +254,20 @@ export function createDuel({ random, winScore = MATCH.winScore, playerTeam = 0, 
       Object.assign(stats, createStats());
       startRound();
     },
-    // the same again from 0 : 0
-    rematch() {
+    // the same again from 0 : 0, CLU riding at `level` (0..1) from now on
+    rematch(level = difficulty) {
+      if (level !== difficulty) {
+        difficulty = level;
+        cluBrain = createBrain(cluPersona(difficulty), seededRandom(random() * 2 ** 32));
+      }
       this.start();
+    },
+    // waits at the start before the countdown, until go()
+    hold() {
+      if (phase === 'countdown' && phaseTime === 0) setPhase('ready');
+    },
+    go() {
+      if (phase === 'ready') setPhase('countdown');
     },
     // done with the result
     finish() {

@@ -144,3 +144,64 @@ export function createHandlebars() {
 
   return { state, update, recalibrate };
 }
+
+// Waiting for a steady grip before a ride starts: both hands holding on,
+// roughly level and not moving towards or away from the camera, for `hold`
+// seconds. A blink of the tracker is bridged rather than starting over.
+export const GRIP_CHECK = {
+  hold: 0.8,              // s of steady grip it waits for
+  maxTilt: 12,            // degrees: tilted further, the hands are steering, not holding still
+  maxDrift: 0.12,         // palm size change (fraction) between a quick and a slow average
+  forgive: 0.15,          // s a broken reading is bridged
+};
+
+export function createGripCheck(options = {}) {
+  const settings = { ...GRIP_CHECK, ...options };
+  // progress: 0..1 of the hold; hint: what is in the way, '' when nothing is
+  const result = { progress: 0, steady: false, hint: 'need both hands', reading: null };
+  let held = 0;
+  let lost = 0;
+  let quick = 0;          // palm size, averaged over a short and a longer time
+  let slow = 0;
+
+  function reset() {
+    held = 0;
+    lost = 0;
+    quick = 0;
+    slow = 0;
+    result.progress = 0;
+    result.steady = false;
+  }
+
+  // Call once per frame after hands.update(); returns the result object.
+  function update(hands, dt, aspect = window.innerWidth / window.innerHeight) {
+    const reading = measureHandlebars(hands.left, hands.right, aspect);
+    result.reading = reading;
+    let still = reading.valid;
+    let hint = reading.reason;
+    if (reading.valid) {
+      quick = quick ? quick + (reading.size - quick) * Math.min(1, dt / 0.1) : reading.size;
+      slow = slow ? slow + (reading.size - slow) * Math.min(1, dt / 0.5) : reading.size;
+      if (Math.abs(reading.tilt) > settings.maxTilt) {
+        still = false;
+        hint = 'level your hands';
+      } else if (Math.abs(quick - slow) / slow > settings.maxDrift) {
+        still = false;
+        hint = 'hold still';
+      }
+    }
+    if (still) {
+      lost = 0;
+      held += dt;
+    } else if ((lost += dt) > settings.forgive) {
+      held = Math.max(0, held - dt * 2);
+      if (!reading.valid) quick = slow = 0;
+    }
+    result.progress = Math.min(1, held / settings.hold);
+    result.steady = held >= settings.hold;
+    result.hint = hint;
+    return result;
+  }
+
+  return { update, reset, state: result };
+}

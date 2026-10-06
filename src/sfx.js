@@ -1,6 +1,7 @@
-// Synthesised sound effects (Web Audio, no samples): entering the Grid and
-// the END OF LINE power-down. Everything runs through `output`, so muting the
-// music mutes these too.
+// Synthesised sound effects (Web Audio, no samples): entering the Grid, the
+// END OF LINE power-down, typing, and the light cycle duel's sounds.
+// Everything runs through `output` (music.js: the mute and the limiter), so
+// muting the music mutes these too.
 
 export function createSfx(context, output) {
   const bus = context.createGain();
@@ -220,5 +221,116 @@ export function createSfx(context, output) {
     whine.stop(now + 0.8);
   }
 
-  return { enterGrid, powerDown, key, crtOff };
+  // The light cycle duel's sounds (src/effects/tron/ride/sound.js asks for
+  // them): countdown beeps and the GO, a derezz crash (deeper and longer
+  // when a replay plays it in slow motion), a rush of air for a jump, a
+  // ping when CLU comes close, the winner's chord, a rising tone for a
+  // rematch, and an engine hum that follows the speed. They stay dry, at
+  // the level they had when the ride played them itself.
+  const ride = context.createGain();
+  ride.gain.value = 0.78;
+  ride.connect(bus);
+  let engine = null;
+
+  function rideTone(type, frequency, at, peak, attack, release, glideTo = null) {
+    const oscillator = context.createOscillator();
+    oscillator.type = type;
+    oscillator.frequency.setValueAtTime(frequency, at);
+    if (glideTo) oscillator.frequency.exponentialRampToValueAtTime(glideTo, at + attack + release);
+    oscillator.connect(envelope(at, peak, attack, release)).connect(ride);
+    oscillator.start(at);
+    oscillator.stop(at + attack + release + 0.05);
+  }
+
+  // noise through a band-pass sweeping from `from` to `to` Hz
+  function rideNoise(at, peak, release, from, to) {
+    const source = noise();
+    const filter = context.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.Q.value = 0.8;
+    filter.frequency.setValueAtTime(from, at);
+    filter.frequency.exponentialRampToValueAtTime(to, at + release);
+    source.connect(filter).connect(envelope(at, peak, 0.005, release)).connect(ride);
+    source.start(at);
+    source.stop(at + release + 0.1);
+  }
+
+  // 3, 2, 1 (count > 0): a beep; 0: GO
+  function rideTick(count) {
+    const at = context.currentTime;
+    if (count > 0) rideTone('square', 660, at, 0.05, 0.004, 0.16);
+    else {
+      rideTone('square', 1320, at, 0.06, 0.004, 0.45);
+      rideNoise(at, 0.08, 0.6, 600, 4000);
+    }
+  }
+
+  // speed: 1 as it happens, less for a slow-motion replay (lower and longer)
+  function rideCrash(speed = 1) {
+    const at = context.currentTime;
+    const slow = 1 / Math.max(0.2, speed);
+    rideNoise(at, 0.35, 0.9 * slow, 5000 * speed, 300 * speed);
+    rideTone('sawtooth', 420 * speed, at, 0.1, 0.005, 0.7 * slow, 40);
+    rideTone('sine', 90 * speed, at, 0.4, 0.005, 0.6 * slow, 30);
+    // a glassy shatter: a few quick high blips
+    for (let k = 0; k < 6; k++) {
+      rideTone('triangle', (2000 + Math.random() * 3000) * speed, at + (0.03 + k * 0.045) * slow, 0.03, 0.002, 0.08 * slow);
+    }
+  }
+
+  function rideJump() {
+    rideNoise(context.currentTime, 0.06, 0.7, 900, 2600);
+  }
+
+  function rideWarn() {
+    const at = context.currentTime;
+    rideTone('sine', 1180, at, 0.035, 0.004, 0.12);
+    rideTone('sine', 1180, at + 0.14, 0.03, 0.004, 0.12);
+  }
+
+  function rideRematch() {
+    rideTone('sawtooth', 220, context.currentTime, 0.05, 0.05, 0.8, 880);
+  }
+
+  function rideWin(playerWon) {
+    const at = context.currentTime;
+    const chord = playerWon ? [440, 554, 659, 880] : [392, 466, 587, 784];
+    chord.forEach((frequency, index) => rideTone('sawtooth', frequency, at + index * 0.05, 0.035, 0.03, 1.6));
+  }
+
+  // every frame while riding, speed in m/s; 0 stops it
+  function rideEngine(speed) {
+    const at = context.currentTime;
+    if (speed <= 0) {
+      if (engine) {
+        engine.gain.gain.setTargetAtTime(0.0001, at, 0.15);
+        engine.oscillators.forEach((oscillator) => oscillator.stop(at + 0.6));
+        engine = null;
+      }
+      return;
+    }
+    if (!engine) {
+      const gain = context.createGain();
+      gain.gain.value = 0.0001;
+      const filter = context.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.value = 500;
+      filter.connect(gain).connect(ride);
+      const oscillators = [0, 7].map((detune) => {
+        const oscillator = context.createOscillator();
+        oscillator.type = 'sawtooth';
+        oscillator.detune.value = detune;
+        oscillator.connect(filter);
+        oscillator.start();
+        return oscillator;
+      });
+      engine = { gain, filter, oscillators };
+    }
+    const pitch = 38 + speed * 1.6;
+    for (const oscillator of engine.oscillators) oscillator.frequency.setTargetAtTime(pitch, at, 0.08);
+    engine.filter.frequency.setTargetAtTime(300 + speed * 18, at, 0.1);
+    engine.gain.gain.setTargetAtTime(0.03, at, 0.2);
+  }
+
+  return { enterGrid, powerDown, key, crtOff, rideTick, rideCrash, rideJump, rideWarn, rideRematch, rideWin, rideEngine };
 }

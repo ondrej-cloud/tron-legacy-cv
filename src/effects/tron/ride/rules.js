@@ -55,6 +55,14 @@ export const MATCH = {
   idleAfter: 1.5,         // s without a grip before the cycle cruises on its own
 };
 
+// The difficulties to choose from on the result screen (1, 2 or 3 fingers
+// held up, or the keys): how sharp CLU rides at each (cluPersona, brain.js).
+export const LEVELS = [
+  { name: 'EASY', difficulty: 0.2 },
+  { name: 'NORMAL', difficulty: MATCH.difficulty },
+  { name: 'HARD', difficulty: 0.9 },
+];
+
 // Start positions: the player south of the centre facing north (+z), CLU
 // north of it facing south, close enough to see each other rezz; the rest
 // of the floor is room to manoeuvre.

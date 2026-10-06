@@ -22,6 +22,11 @@ export function createMirror(renderer) {
   const scissor = new THREE.Vector4();
 
   return {
+    // its overlay's shader, compiled in the background (for a ride that
+    // starts before the warm-up has drawn it once)
+    compile() {
+      return renderer.compileAsync(overlay, flat);
+    },
     // Draws the mirror: `scene` seen back from `rider`, into `rect` (CSS px
     // from the top left of a viewport `viewHeight` tall), `alpha` 0..1.
     render(scene, rider, rect, viewHeight, alpha) {

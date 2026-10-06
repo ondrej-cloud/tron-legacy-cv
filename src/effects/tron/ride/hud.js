@@ -44,6 +44,20 @@ export function createRideHud(container) {
     context.letterSpacing = '0px';
   }
 
+  // how wide `value` is set at `size` px with letter spacing `spacing` em
+  function textWidth(value, size, spacing, weight = 400, font = FONT) {
+    context.font = `${weight} ${size}px ${font}`;
+    context.letterSpacing = `${spacing}em`;
+    const measured = context.measureText(value).width;
+    context.letterSpacing = '0px';
+    return measured;
+  }
+
+  // the largest size up to `size` at which `value` fits in `maxWidth` px
+  function fitSize(value, size, spacing, weight, maxWidth) {
+    return size * Math.min(1, maxWidth / Math.max(1, textWidth(value, size, spacing, weight)));
+  }
+
   function rule(x0, x1, y, color, alpha) {
     context.fillStyle = `rgba(${color}, ${alpha})`;
     context.fillRect(x0, y, x1 - x0, 1);
@@ -135,6 +149,137 @@ export function createRideHud(container) {
     text('HOLD BOTH FISTS UP LIKE HANDLEBARS', width / 2, y, WHITE, blink, 15, { align: 'center', spacing: 0.3, weight: 500 });
     if (info.reason) text(info.reason.toUpperCase(), width / 2, y + 22, info.accent, 0.7, 10, { align: 'center', spacing: 0.4 });
     return [0, y - 24, width, 56];
+  }
+
+  // The grip tutorial (tutorial.js): two fists on a handlebar, held, tilted
+  // and pushed in turn, the three steps beside them (the one shown lit), a
+  // ring that fills while a steady grip is held, and what is in the way.
+  function drawTutorial(info, seconds) {
+    const accent = info.accent;
+    const w = Math.min(700, width - 48);
+    const h = 236;
+    const x0 = width / 2 - w / 2;
+    const y0 = height * 0.43 - h / 2;
+    const alpha = info.fade * Math.min(1, info.time * 3);
+    context.globalAlpha = alpha;
+    context.fillStyle = 'rgba(0, 6, 10, 0.72)';
+    roundedRect(x0, y0, w, h, 8);
+    context.fill();
+    context.strokeStyle = `rgba(${accent}, 0.55)`;
+    context.lineWidth = 1;
+    context.stroke();
+    text('TAKE THE HANDLEBARS', width / 2, y0 + 38, WHITE, 1, 22,
+      { align: 'center', weight: 300, font: TITLE_FONT, spacing: 0.3, blur: 14 });
+    rule(width / 2 - 150, width / 2 + 150, y0 + 52, accent, 0.6);
+
+    // the glyph, going through the three steps in a loop
+    const cycle = 4.8;
+    const local = info.time % cycle;
+    const step = Math.min(2, Math.floor(local / (cycle / 3)));
+    const t = (local % (cycle / 3)) / (cycle / 3);
+    const tilt = step === 1 ? Math.sin(t * Math.PI * 2) * 0.38 : 0;
+    const push = step === 2 ? Math.sin(t * Math.PI) : 0;
+    const gx = x0 + Math.min(130, w * 0.22);
+    const gy = y0 + 140;
+    handlebarGlyph(gx, gy + (step === 0 ? Math.sin(info.time * 3) * 2 : 0), tilt, 1 + 0.22 * push, push, accent);
+    // the ring around it: how long the grip has been steady
+    const ring = 66;
+    context.strokeStyle = `rgba(${WHITE}, 0.18)`;
+    context.lineWidth = 2;
+    context.beginPath();
+    context.arc(gx, gy, ring, 0, Math.PI * 2);
+    context.stroke();
+    if (info.progress > 0) {
+      context.strokeStyle = `rgba(${accent}, 1)`;
+      context.shadowColor = `rgba(${accent}, 1)`;
+      context.shadowBlur = 12;
+      context.lineWidth = info.locked === null ? 3 : 3 + 4 * Math.max(0, 1 - info.locked * 4);
+      context.beginPath();
+      context.arc(gx, gy, ring, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * info.progress);
+      context.stroke();
+      context.shadowBlur = 0;
+    }
+    context.lineWidth = 1;
+
+    // the steps, as big as fits beside the glyph
+    const steps = ['HOLD BOTH FISTS UP LIKE HANDLEBARS', 'TILT TO STEER', 'PUSH TOWARDS THE CAMERA TO BOOST'];
+    const sx = gx + ring + 34;
+    const size = Math.min(...steps.map((words) => fitSize(words, 14, 0.22, 600, x0 + w - sx - 34 - 18)));
+    steps.forEach((words, index) => {
+      const y = y0 + 98 + index * 40;
+      const lit = index === step;
+      const passed = index === 0 && info.locked !== null;
+      text(`0${index + 1}`, sx, y, accent, lit || passed ? 1 : 0.45, 12, { weight: 600, spacing: 0.2 });
+      text(words, sx + 34, y, passed ? accent : WHITE, lit ? 1 : 0.55, size, { spacing: 0.22, weight: lit ? 600 : 400 });
+      if (lit) {
+        context.fillStyle = `rgba(${accent}, 0.9)`;
+        context.fillRect(sx - 12, y - 10, 2, 13);
+      }
+    });
+
+    // what is in the way, or that it has locked in
+    const status = info.locked !== null ? 'GRIP LOCKED' : info.hint || (info.progress > 0 ? 'HOLD STEADY' : '');
+    if (status) {
+      // on a dark card, so it reads over the floor's lines
+      const statusWidth = textWidth(status, 13, 0.35, 600);
+      context.fillStyle = 'rgba(0, 6, 10, 0.7)';
+      roundedRect(width / 2 - statusWidth / 2 - 14, y0 + h + 12, statusWidth + 28, 27, 4);
+      context.fill();
+      const blink = info.hint ? 0.7 + 0.3 * Math.sin(seconds * 6) : 1;
+      text(status, width / 2 + 2, y0 + h + 30, info.hint ? WHITE : accent, blink, 13, { align: 'center', spacing: 0.35, weight: 600 });
+    }
+    text('ARROW KEYS: RIDE WITHOUT THE CAMERA', width / 2, y0 + h + 52, WHITE, 0.4, 9, { align: 'center', spacing: 0.4 });
+    context.globalAlpha = 1;
+    return [x0 - 10, y0 - 10, w + 20, h + 74];
+  }
+
+  // two fists on a bar, the bar turned by `angle` (clockwise: a right turn),
+  // `scale` bigger as they push towards the camera, with speed lines then
+  function handlebarGlyph(x, y, angle, scale, rush, color) {
+    context.save();
+    context.translate(x, y);
+    context.scale(scale, scale);
+    if (rush > 0.05) {
+      context.strokeStyle = `rgba(${color}, ${0.6 * rush})`;
+      context.lineWidth = 1;
+      for (const [sx, sy] of [[-58, -30], [58, -30], [-64, 18], [64, 18], [-48, 34], [48, 34]]) {
+        context.beginPath();
+        context.moveTo(sx, sy);
+        context.lineTo(sx * (1 + 0.35 * rush), sy * (1 + 0.35 * rush));
+        context.stroke();
+      }
+    }
+    context.rotate(angle);
+    context.strokeStyle = `rgba(${color}, 1)`;
+    context.shadowColor = `rgba(${color}, 0.9)`;
+    context.shadowBlur = 8;
+    context.lineWidth = 2;
+    // the bar, through both fists
+    context.beginPath();
+    context.moveTo(-48, 0);
+    context.lineTo(48, 0);
+    context.stroke();
+    for (const side of [-1, 1]) {
+      const fx = side * 26;
+      context.fillStyle = 'rgba(0, 6, 10, 0.9)';
+      context.beginPath();
+      context.roundRect(fx - 11, -16, 22, 30, 6);
+      context.fill();
+      context.stroke();
+      // knuckles, and the thumb across the front
+      context.lineWidth = 1;
+      context.beginPath();
+      for (let knuckle = 0; knuckle < 3; knuckle++) {
+        context.moveTo(fx - 11, -8 + knuckle * 6);
+        context.lineTo(fx + 4, -8 + knuckle * 6);
+      }
+      context.moveTo(fx - side * 9, 9);
+      context.lineTo(fx + side * 6, 4);
+      context.stroke();
+      context.lineWidth = 2;
+    }
+    context.shadowBlur = 0;
+    context.restore();
   }
 
   // big centred words: the countdown, GO, the result
@@ -423,11 +568,15 @@ export function createRideHud(container) {
   }
 
   // The end of a match: the winner, the score counting up, the match's
-  // numbers one by one, and the two ways on (each charging while its
-  // gesture is held).
+  // numbers one by one, the personal bests, the two ways on (each charging
+  // while its gesture is held) and the next match's difficulty.
   function drawResult(info, seconds) {
     const t = info.time;
     const cx = width / 2;
+    // with the bests and the difficulty to fit in too, all of it sits higher
+    const rows = info.levels || info.bests
+      ? { title: 0.24, score: 0.37, stats: 0.455, prompts: 0.655 }
+      : { title: 0.3, score: 0.47, stats: 0.55, prompts: 0.76 };
     const appear = (start, length = 0.35) => Math.min(1, Math.max(0, (t - start) / length));
     // a darker band behind the words, so they read over the arena
     const band = context.createLinearGradient(0, height * 0.12, 0, height * 0.95);
@@ -443,7 +592,7 @@ export function createRideHud(container) {
     // the winner, settling in from a little bigger
     const titleIn = appear(0.1, 0.5);
     const size = Math.round(Math.min(120, width / 11) * (1.15 - 0.15 * titleIn ** 0.5));
-    const titleY = height * 0.3;
+    const titleY = height * rows.title;
     text(info.title, cx + size * 0.1, titleY, WHITE, titleIn, size, { align: 'center', weight: 200, font: TITLE_FONT, spacing: 0.2, blur: 26 });
     const reach = Math.min(width * 0.38, size * info.title.length * 0.42) * titleIn;
     rule(cx - reach, cx + reach, titleY + 22, info.color, titleIn * 0.9);
@@ -451,7 +600,7 @@ export function createRideHud(container) {
 
     // the score: each side counts up to its rounds
     const scoreIn = appear(0.7);
-    const scoreY = height * 0.47;
+    const scoreY = height * rows.score;
     info.score.forEach((score, index) => {
       const shown = Math.min(score, Math.floor(Math.max(0, t - 0.8) / 0.22));
       const color = index === 0 ? info.accent : info.enemy;
@@ -467,7 +616,7 @@ export function createRideHud(container) {
     text(':', cx, scoreY - 6, WHITE, scoreIn * 0.7, 40, { align: 'center', font: TITLE_FONT, spacing: 0 });
 
     // the match's numbers, on a panel of their own
-    const statsY = height * 0.55;
+    const statsY = height * rows.stats;
     const columns = info.stats.length;
     const columnWidth = Math.min(170, (width * 0.7) / columns);
     const panelIn = appear(1.2);
@@ -482,15 +631,94 @@ export function createRideHud(container) {
     });
     rule(cx - columnWidth * columns / 2, cx + columnWidth * columns / 2, statsY + 44, WHITE, appear(1.3) * 0.3);
 
+    if (info.bests) drawBests(info.bests, statsY + 86, appear(1.8), info.accent, seconds);
+
     // the ways on
     const promptsIn = appear(2.0, 0.5);
+    const boxY = height * rows.prompts;
     if (info.demo !== null) {
-      text(`NEXT IN ${Math.ceil(info.demo)}`, cx, height * 0.74, WHITE, promptsIn * 0.7, 11, { align: 'center', spacing: 0.45 });
+      text(`NEXT IN ${Math.ceil(info.demo)}`, cx, boxY - height * 0.02, WHITE, promptsIn * 0.7, 11, { align: 'center', spacing: 0.45 });
     }
-    const boxY = height * 0.76;
     choicePrompt(cx - 190, boxY, 'REMATCH', 'BOTH PALMS OPEN  ·  R', 'palms', info.rematch, info.accent, promptsIn, seconds);
     choicePrompt(cx + 190, boxY, 'END OF LINE', 'TWO FISTS TOGETHER  ·  ESC', 'fists', info.endOfLine, info.enemy, promptsIn, seconds);
+    if (info.levels) drawLevels(info.levels, boxY + 112, appear(2.3, 0.5), info.accent);
     return [0, height * 0.12, width, height * 0.83];
+  }
+
+  // The personal bests side by side, a beaten one lit, with NEW BEST
+  // flashing under it.
+  function drawBests(bests, y, alpha, accent, seconds) {
+    if (alpha <= 0) return;
+    const spread = Math.min(300, width * 0.4);
+    bests.forEach((best, index) => {
+      const x = width / 2 + (index - (bests.length - 1) / 2) * spread;
+      text(best.label, x, y, WHITE, alpha * 0.55, 9, { align: 'center', spacing: 0.4 });
+      text(best.value, x, y + 24, best.fresh ? accent : WHITE, alpha * (best.fresh ? 1 : 0.85), 19,
+        { align: 'center', weight: 300, font: TITLE_FONT, spacing: 0.08, blur: best.fresh ? 18 : 8 });
+      if (!best.fresh) return;
+      const flash = 0.55 + 0.45 * Math.sin(seconds * 9);
+      context.font = `700 10px ${FONT}`;
+      context.letterSpacing = '0.35em';
+      const tagWidth = context.measureText('NEW BEST').width;
+      context.letterSpacing = '0px';
+      context.fillStyle = `rgba(${accent}, ${0.22 * alpha * flash})`;
+      context.strokeStyle = `rgba(${accent}, ${alpha * flash})`;
+      roundedRect(x - tagWidth / 2 - 8, y + 33, tagWidth + 14, 17, 3);
+      context.fill();
+      context.stroke();
+      text('NEW BEST', x + 2, y + 45, accent, alpha * flash, 10, { align: 'center', spacing: 0.35, weight: 700 });
+    });
+  }
+
+  // The next match's difficulty: a card for each, the chosen one lit
+  // (flashing as it changes), the one a hand is holding up charging, and
+  // the record at each.
+  function drawLevels(levels, y, alpha, accent) {
+    if (alpha <= 0) return;
+    const count = levels.names.length;
+    const w = Math.min(150, (width - 80) / count - 12);
+    const h = 52;
+    const gap = 12;
+    const left = width / 2 - (count * w + (count - 1) * gap) / 2;
+    text('NEXT MATCH  ·  HOLD UP 1, 2 OR 3 FINGERS  ·  KEYS 1 2 3', width / 2, y - 12, WHITE, alpha * 0.5, 9,
+      { align: 'center', spacing: 0.35 });
+    levels.names.forEach((name, index) => {
+      const x = left + index * (w + gap);
+      const current = index === levels.current;
+      const flash = current ? Math.max(0, 1 - levels.changed * 2) : 0;
+      const charge = levels.pending?.level === index ? levels.pending.charge : 0;
+      context.fillStyle = current ? `rgba(${accent}, ${(0.16 + 0.35 * flash) * alpha})` : `rgba(0, 6, 10, ${0.55 * alpha})`;
+      roundedRect(x, y, w, h, 6);
+      context.fill();
+      context.strokeStyle = current ? `rgba(${accent}, ${0.95 * alpha})` : `rgba(${WHITE}, ${(charge ? 0.6 : 0.28) * alpha})`;
+      context.lineWidth = current ? 1.5 : 1;
+      context.stroke();
+      context.lineWidth = 1;
+      fingers(x + 24, y + h / 2 + 3, index + 1, current || charge ? accent : WHITE, alpha * (current ? 1 : 0.6));
+      text(name, x + 46, y + 23, current ? accent : WHITE, alpha * (current ? 1 : 0.7), 13, { weight: 600, spacing: 0.3 });
+      text(levels.records[index], x + 46, y + 39, WHITE, alpha * 0.5, 9, { spacing: 0.25 });
+      if (charge) {
+        context.fillStyle = `rgba(${accent}, ${alpha})`;
+        context.fillRect(x, y + h - 3, w * charge, 3);
+      }
+    });
+  }
+
+  // a hand holding up `count` fingers, the others folded
+  function fingers(x, y, count, color, alpha) {
+    context.strokeStyle = `rgba(${color}, ${alpha})`;
+    context.lineWidth = 2;
+    context.lineCap = 'round';
+    context.beginPath();
+    context.roundRect(x - 9, y - 3, 18, 14, 4);
+    for (let finger = 0; finger < 4; finger++) {
+      const fx = x - 6.6 + finger * 4.4;
+      context.moveTo(fx, y - 3);
+      context.lineTo(fx, finger < count ? y - 19 + Math.abs(finger - 1.5) * 1.6 : y - 6);
+    }
+    context.stroke();
+    context.lineCap = 'butt';
+    context.lineWidth = 1;
   }
 
   // one way on: a pictogram of the gesture, its name, how to do it, and a
@@ -659,6 +887,7 @@ export function createRideHud(container) {
         }
         if (info.gauges) drawn.push(drawSpeed(info.gauges), drawSteering(info.gauges));
         if (info.hint) drawn.push(drawHint(info.hint, seconds));
+        if (info.tutorial) drawn.push(drawTutorial(info.tutorial, seconds));
         if (info.banner) {
           const { words, sub, color, scale, alpha } = info.banner;
           drawn.push(banner(words, sub, color, scale, alpha));
